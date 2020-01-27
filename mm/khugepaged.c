@@ -18,6 +18,7 @@
 #include <linux/page_idle.h>
 #include <linux/swapops.h>
 #include <linux/shmem_fs.h>
+#include <linux/mm_econ.h>
 
 #include <asm/tlb.h>
 #include <asm/pgalloc.h>
@@ -2053,8 +2054,18 @@ static int khugepaged_has_work(void)
 
 static int khugepaged_wait_event(void)
 {
-	return !list_empty(&khugepaged_scan.mm_head) ||
-		kthread_should_stop();
+    struct mm_cost_delta mm_cost_delta;
+    struct mm_action mm_action = {
+        .action = MM_ACTION_RUN_DEFRAG,
+        .unused = 0,
+    };
+    bool should_run;
+    mm_estimate_changes(&mm_action, &mm_cost_delta);
+    should_run = mm_decide(&mm_cost_delta);
+
+	return should_run &&
+        (!list_empty(&khugepaged_scan.mm_head) ||
+		kthread_should_stop());
 }
 
 static void khugepaged_do_scan(void)
@@ -2078,10 +2089,8 @@ static void khugepaged_do_scan(void)
 		spin_lock(&khugepaged_mm_lock);
 		if (!khugepaged_scan.mm_slot)
 			pass_through_head++;
-		if (khugepaged_has_work() &&
-		    pass_through_head < 2)
-			progress += khugepaged_scan_mm_slot(pages - progress,
-							    &hpage);
+		if (khugepaged_has_work() && pass_through_head < 2)
+			progress += khugepaged_scan_mm_slot(pages - progress, &hpage);
 		else
 			progress = pages;
 		spin_unlock(&khugepaged_mm_lock);
@@ -2114,7 +2123,7 @@ static void khugepaged_wait_work(void)
 	}
 
 	if (khugepaged_enabled())
-		wait_event_freezable(khugepaged_wait, khugepaged_wait_event());
+        wait_event_freezable(khugepaged_wait, khugepaged_wait_event());
 }
 
 static int khugepaged(void *none)

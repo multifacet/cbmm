@@ -407,6 +407,11 @@ choice
 	  benefit.
 endchoice
 
+config MM_ECON
+    bool "Use economic models for memory management"
+    help
+        Use economic models for memory management.
+
 config ARCH_WANTS_THP_SWAP
 	def_bool n
 
