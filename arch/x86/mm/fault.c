@@ -18,6 +18,7 @@
 #include <linux/uaccess.h>		/* faulthandler_disabled()	*/
 #include <linux/efi.h>			/* efi_recover_from_page_fault()*/
 #include <linux/mm_types.h>
+#include <linux/mm_stats.h>
 
 #include <asm/cpufeature.h>		/* boot_cpu_has, ...		*/
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
@@ -1525,9 +1526,13 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code, unsigned long addr
 {
 	enum ctx_state prev_state;
 
+    u64 start = rdtsc();
+
 	prev_state = exception_enter();
 	trace_page_fault_entries(regs, error_code, address);
 	__do_page_fault(regs, error_code, address);
 	exception_exit(prev_state);
+
+    mm_stats_hist_measure(&mm_page_fault_cycles, rdtsc() - start);
 }
 NOKPROBE_SYMBOL(do_page_fault);

@@ -68,6 +68,7 @@
 #include <linux/lockdep.h>
 #include <linux/nmi.h>
 #include <linux/psi.h>
+#include <linux/mm_stats.h>
 
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
@@ -3880,9 +3881,12 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 	struct page *page = NULL;
 	unsigned long pflags;
 	unsigned int noreclaim_flag;
+    u64 start;
 
 	if (!order)
 		return NULL;
+
+    start = rdtsc();
 
 	psi_memstall_enter(&pflags);
 	noreclaim_flag = memalloc_noreclaim_save();
@@ -3906,6 +3910,9 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 	/* Try get a page from the freelist if available */
 	if (!page)
 		page = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
+
+    // The rest is fairly cheap
+    mm_stats_hist_measure(&mm_direct_compaction_cycles, rdtsc() - start);
 
 	if (page) {
 		struct zone *zone = page_zone(page);
