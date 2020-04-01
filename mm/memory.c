@@ -4070,7 +4070,9 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 		return VM_FAULT_OOM;
 retry_pud:
 	if (pud_none(*vmf.pud) && __transparent_hugepage_enabled(vma)) {
-        // (markm) run the estimator to check if we should promote to a 1GB page.
+        // (markm) No entry present.
+
+        // (markm) run the estimator to check if we should create a 1GB page.
         mm_action.action = MM_ACTION_PROMOTE_HUGE;
         mm_action.huge_page_order = HPAGE_PUD_SHIFT-PAGE_SHIFT;
         mm_estimate_changes(&mm_action, &mm_cost_delta);
@@ -4082,6 +4084,8 @@ retry_pud:
                 return ret;
         }
 	} else {
+        // (markm) Entry is already present.
+
 		pud_t orig_pud = *vmf.pud;
 
 		barrier();
@@ -4109,7 +4113,9 @@ retry_pud:
 		goto retry_pud;
 
 	if (pmd_none(*vmf.pmd) && __transparent_hugepage_enabled(vma)) {
-        // (markm) run the estimator to check if we should promote to a 2MB page.
+        // (markm) No entry present.
+
+        // (markm) run the estimator to check if we should create a 2MB page.
         mm_action.action = MM_ACTION_PROMOTE_HUGE;
         mm_action.huge_page_order = HPAGE_PMD_ORDER;
         mm_estimate_changes(&mm_action, &mm_cost_delta);
@@ -4121,6 +4127,8 @@ retry_pud:
                 return ret;
         }
 	} else {
+        // (markm) Entry is already present.
+
 		pmd_t orig_pmd = *vmf.pmd;
 
 		barrier();
@@ -4146,7 +4154,7 @@ retry_pud:
 		}
 	}
 
-	return handle_pte_fault(&vmf);
+	return handle_pte_fault(&vmf) | VM_FAULT_BASE_PAGE;
 }
 
 /*
