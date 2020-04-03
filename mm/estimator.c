@@ -48,5 +48,6 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
 // action associated with `cost` should be TAKEN, and false otherwise.
 bool mm_decide(const struct mm_cost_delta *cost)
 {
-    return false;
+    // TODO(markm): for now default to the normal linux behavior
+    return true;
 }
