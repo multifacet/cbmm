@@ -72,6 +72,7 @@
 #include <linux/oom.h>
 #include <linux/numa.h>
 #include <linux/mm_econ.h>
+#include <linux/mm_stats.h>
 
 #include <trace/events/kmem.h>
 
@@ -4708,6 +4709,7 @@ void clear_huge_page(struct page *page,
 {
 	unsigned long addr = addr_hint &
 		~(((unsigned long)pages_per_huge_page << PAGE_SHIFT) - 1);
+	u64 start = rdtsc();
 
 	if (unlikely(pages_per_huge_page > MAX_ORDER_NR_PAGES)) {
 		clear_gigantic_page(page, addr, pages_per_huge_page);
@@ -4715,6 +4717,8 @@ void clear_huge_page(struct page *page,
 	}
 
 	process_huge_page(addr_hint, pages_per_huge_page, clear_subpage, page);
+
+	mm_stats_hist_measure(&mm_huge_page_fault_clear_cycles, rdtsc() - start);
 }
 
 static void copy_user_gigantic_page(struct page *dst, struct page *src,
