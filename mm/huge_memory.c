@@ -1331,6 +1331,7 @@ vm_fault_t do_huge_pmd_wp_page(struct vm_fault *vmf, pmd_t orig_pmd)
 	struct mmu_notifier_range range;
 	gfp_t huge_gfp;			/* for allocation and charge */
 	vm_fault_t ret = 0;
+	u64 start = rdtsc();
 
 	vmf->ptl = pmd_lockptr(vma->vm_mm, vmf->pmd);
 	VM_BUG_ON_VMA(!vma->anon_vma, vma);
@@ -1457,6 +1458,7 @@ out_mn:
 	 */
 	mmu_notifier_invalidate_range_only_end(&range);
 out:
+	mm_stats_hist_measure(&mm_huge_page_fault_wp_cycles, rdtsc() - start);
 	return ret;
 out_unlock:
 	spin_unlock(vmf->ptl);

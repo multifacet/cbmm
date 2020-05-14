@@ -4144,6 +4144,8 @@ retry_pud:
 			if (pmd_protnone(orig_pmd) && vma_is_accessible(vma))
 				return do_huge_pmd_numa_page(&vmf, orig_pmd);
 
+			// TODO(markm): wp_huge_pmd/pud are for huge COW
+			// faults. Should add mm-econ logic here too.
 			if (dirty && !pmd_write(orig_pmd)) {
 				ret = wp_huge_pmd(&vmf, orig_pmd);
 				if (!(ret & VM_FAULT_FALLBACK))
@@ -4787,6 +4789,7 @@ void copy_user_huge_page(struct page *dst, struct page *src,
 		.src = src,
 		.vma = vma,
 	};
+	u64 start = rdtsc();
 
 	if (unlikely(pages_per_huge_page > MAX_ORDER_NR_PAGES)) {
 		copy_user_gigantic_page(dst, src, addr, vma,
@@ -4795,6 +4798,8 @@ void copy_user_huge_page(struct page *dst, struct page *src,
 	}
 
 	process_huge_page(addr_hint, pages_per_huge_page, copy_subpage, &arg);
+
+	mm_stats_hist_measure(&mm_huge_page_fault_cow_copy_huge_cycles, rdtsc() - start);
 }
 
 long copy_huge_page_from_user(struct page *dst_page,
