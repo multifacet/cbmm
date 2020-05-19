@@ -4647,6 +4647,8 @@ static inline void process_huge_page(
 	unsigned long addr = addr_hint &
 		~(((unsigned long)pages_per_huge_page << PAGE_SHIFT) - 1);
 
+	unsigned long flags;
+
 	u64 start = rdtsc();
 	u64 start_single;
 
@@ -4660,11 +4662,13 @@ static inline void process_huge_page(
 		/* Process subpages at the end of huge page */
 		for (i = pages_per_huge_page - 1; i >= 2 * n; i--) {
 			cond_resched();
+			local_irq_save(flags);
 			start_single = rdtsc();
 			process_subpage(addr + i * PAGE_SIZE, i, arg);
 			mm_stats_hist_measure(
 				&mm_process_huge_page_single_page_cycles,
 				rdtsc() - start_single);
+			local_irq_restore(flags);
 		}
 	} else {
 		/* If target subpage in second half of huge page */
@@ -4673,11 +4677,13 @@ static inline void process_huge_page(
 		/* Process subpages at the begin of huge page */
 		for (i = 0; i < base; i++) {
 			cond_resched();
+			local_irq_save(flags);
 			start_single = rdtsc();
 			process_subpage(addr + i * PAGE_SIZE, i, arg);
 			mm_stats_hist_measure(
 				&mm_process_huge_page_single_page_cycles,
 				rdtsc() - start_single);
+			local_irq_restore(flags);
 		}
 	}
 	/*
@@ -4689,18 +4695,22 @@ static inline void process_huge_page(
 		int right_idx = base + 2 * l - 1 - i;
 
 		cond_resched();
+		local_irq_save(flags);
 		start_single = rdtsc();
 		process_subpage(addr + left_idx * PAGE_SIZE, left_idx, arg);
 		mm_stats_hist_measure(
 			&mm_process_huge_page_single_page_cycles,
 			rdtsc() - start_single);
+		local_irq_restore(flags);
 
 		cond_resched();
+		local_irq_save(flags);
 		start_single = rdtsc();
 		process_subpage(addr + right_idx * PAGE_SIZE, right_idx, arg);
 		mm_stats_hist_measure(
 			&mm_process_huge_page_single_page_cycles,
 			rdtsc() - start_single);
+		local_irq_restore(flags);
 	}
 
 	mm_stats_hist_measure(&mm_process_huge_page_cycles, rdtsc() - start);
