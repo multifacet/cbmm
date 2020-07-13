@@ -63,6 +63,16 @@ static struct shrinker deferred_split_shrinker;
 static atomic_t huge_zero_refcount;
 struct page *huge_zero_page __read_mostly;
 
+/*
+ * With the `huge_addr` sysfs flag, userspace can choose a single pid and
+ * 2MB-aligned address to make into a huge page.
+ *
+ * Values of 0 indicate that the value is unset. Otherwise, the PID must be a
+ * valid process ID and huge_addr must be a 2MB-aligned address.
+ */
+static pid_t huge_addr_pid = 0;
+static u64 huge_addr = 0;
+
 bool transparent_hugepage_enabled(struct vm_area_struct *vma)
 {
 	/* The addr is used to check if the vma size fits */
@@ -281,6 +291,80 @@ static ssize_t defrag_store(struct kobject *kobj,
 static struct kobj_attribute defrag_attr =
 	__ATTR(defrag, 0644, defrag_show, defrag_store);
 
+static ssize_t huge_addr_pid_show(struct kobject *kobj,
+			   struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", huge_addr_pid);
+}
+
+static ssize_t huge_addr_pid_store(struct kobject *kobj,
+			       struct kobj_attribute *attr,
+			       const char *buf, size_t count)
+{
+	pid_t pid;
+	int ret;
+
+	ret = kstrtoint(buf, 0, &pid);
+
+	if (ret != 0) {
+		huge_addr_pid = 0;
+		return ret;
+	}
+	// Check that this is an existing process.
+	else if (find_vpid(pid) == NULL) {
+		huge_addr_pid = pid;
+		return count;
+	}
+	// Not a valid PID.
+	else {
+		huge_addr_pid = 0;
+		return -EINVAL;
+	}
+}
+static struct kobj_attribute huge_addr_pid_attr =
+	__ATTR(huge_addr_pid, 0644, huge_addr_pid_show, huge_addr_pid_store);
+
+static ssize_t huge_addr_show(struct kobject *kobj,
+			   struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "0x%llx\n", huge_addr);
+}
+
+static void try_huge_addr_promote(pid_t pid, u64 addr)
+{
+	// TODO
+}
+
+static ssize_t huge_addr_store(struct kobject *kobj,
+			       struct kobj_attribute *attr,
+			       const char *buf, size_t count)
+{
+	u64 addr;
+	int ret;
+
+	ret = kstrtoull(buf, 0, &addr);
+
+	if (ret != 0) {
+		huge_addr = 0;
+		return ret;
+	} else if ((addr & PMD_PAGE_MASK) == addr) {
+		huge_addr = addr;
+
+		// If the pid is set, the we should check if the page is
+		// already mapped. If so, then we should promote it.
+		if (huge_addr_pid != 0) {
+			try_huge_addr_promote(huge_addr_pid, huge_addr);
+		}
+
+		return count;
+	} else {
+		huge_addr = 0;
+		return -EINVAL;
+	}
+}
+static struct kobj_attribute huge_addr_attr =
+	__ATTR(huge_addr, 0644, huge_addr_show, huge_addr_store);
+
 static ssize_t use_zero_page_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
@@ -333,6 +417,8 @@ static struct attribute *hugepage_attr[] = {
 #ifdef CONFIG_DEBUG_VM
 	&debug_cow_attr.attr,
 #endif
+	&huge_addr_attr.attr,
+	&huge_addr_pid_attr.attr,
 	NULL,
 };
 
