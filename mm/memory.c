@@ -4055,11 +4055,11 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	pgd_t *pgd;
 	p4d_t *p4d;
 	vm_fault_t ret;
-    struct mm_cost_delta mm_cost_delta;
-    struct mm_action mm_action;
-    bool should_do;
+	struct mm_cost_delta mm_cost_delta;
+	struct mm_action mm_action;
+	bool should_do;
 
-    // (markm) pgd->p4d->pud->pmd->pt->page
+	// (markm) pgd->p4d->pud->pmd->pt->page
 
 	pgd = pgd_offset(mm, address);
 	p4d = p4d_alloc(mm, pgd, address);
@@ -4071,21 +4071,21 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 		return VM_FAULT_OOM;
 retry_pud:
 	if (pud_none(*vmf.pud) && __transparent_hugepage_enabled(vma)) {
-        // (markm) No entry present.
+		// (markm) No entry present.
 
-        // (markm) run the estimator to check if we should create a 1GB page.
-        mm_action.action = MM_ACTION_PROMOTE_HUGE;
-        mm_action.huge_page_order = HPAGE_PUD_SHIFT-PAGE_SHIFT;
-        mm_estimate_changes(&mm_action, &mm_cost_delta);
-        should_do = mm_decide(&mm_cost_delta);
+		// (markm) run the estimator to check if we should create a 1GB page.
+		mm_action.action = MM_ACTION_PROMOTE_HUGE;
+		mm_action.huge_page_order = HPAGE_PUD_SHIFT-PAGE_SHIFT;
+		mm_estimate_changes(&mm_action, &mm_cost_delta);
+		should_do = mm_decide(&mm_cost_delta);
 
-        if (should_do) {
-            ret = create_huge_pud(&vmf);
-            if (!(ret & VM_FAULT_FALLBACK))
-                return ret;
-        }
+		if (should_do) {
+			ret = create_huge_pud(&vmf);
+			if (!(ret & VM_FAULT_FALLBACK))
+				return ret;
+		}
 	} else {
-        // (markm) Entry is already present.
+		// (markm) Entry is already present.
 
 		pud_t orig_pud = *vmf.pud;
 
@@ -4114,28 +4114,28 @@ retry_pud:
 		goto retry_pud;
 
 	if (pmd_none(*vmf.pmd) && __transparent_hugepage_enabled(vma)) {
-        // (markm) No entry present.
+		// (markm) No entry present.
 
-        // (markm) run the estimator to check if we should create a 2MB page.
-        mm_action.action = MM_ACTION_PROMOTE_HUGE;
-        mm_action.huge_page_order = HPAGE_PMD_ORDER;
-        mm_estimate_changes(&mm_action, &mm_cost_delta);
-        should_do = mm_decide(&mm_cost_delta);
+		// (markm) run the estimator to check if we should create a 2MB page.
+		mm_action.action = MM_ACTION_PROMOTE_HUGE;
+		mm_action.huge_page_order = HPAGE_PMD_ORDER;
+		mm_estimate_changes(&mm_action, &mm_cost_delta);
+		should_do = mm_decide(&mm_cost_delta);
 
-        if (should_do) {
-            ret = create_huge_pmd(&vmf);
-            if (!(ret & VM_FAULT_FALLBACK))
-                return ret;
-        }
+		if (should_do) {
+			ret = create_huge_pmd(&vmf);
+			if (!(ret & VM_FAULT_FALLBACK))
+				return ret;
+		}
 	} else {
-        // (markm) Entry is already present.
+		// (markm) Entry is already present.
 
 		pmd_t orig_pmd = *vmf.pmd;
 
 		barrier();
 		if (unlikely(is_swap_pmd(orig_pmd))) {
 			VM_BUG_ON(thp_migration_supported() &&
-					  !is_pmd_migration_entry(orig_pmd));
+					!is_pmd_migration_entry(orig_pmd));
 			if (is_pmd_migration_entry(orig_pmd))
 				pmd_migration_entry_wait(mm, vmf.pmd);
 			return 0;
