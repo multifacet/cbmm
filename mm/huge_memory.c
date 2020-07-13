@@ -347,7 +347,7 @@ static ssize_t huge_addr_pid_store(struct kobject *kobj,
 		return ret;
 	}
 	// Check that this is an existing process.
-	else if (find_vpid(pid) == NULL) {
+	else if (find_vpid(pid) != NULL) {
 		huge_addr_pid = pid;
 		return count;
 	}
