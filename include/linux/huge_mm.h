@@ -90,6 +90,10 @@ extern struct kobj_attribute shmem_enabled_attr;
 extern bool is_vma_temporary_stack(struct vm_area_struct *vma);
 
 extern unsigned long transparent_hugepage_flags;
+extern pid_t huge_addr_pid;
+extern u64 huge_addr;
+
+bool huge_addr_enabled(struct vm_area_struct *vma);
 
 /*
  * to be used on vmas which are known to support THP.
@@ -97,6 +101,10 @@ extern unsigned long transparent_hugepage_flags;
  */
 static inline bool __transparent_hugepage_enabled(struct vm_area_struct *vma)
 {
+	// markm: if huge_addr is on, use a huge page no matter what...
+	if (huge_addr_enabled(vma))
+		return true;
+
 	if (vma->vm_flags & VM_NOHUGEPAGE)
 		return false;
 

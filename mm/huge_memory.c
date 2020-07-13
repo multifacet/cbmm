@@ -70,8 +70,44 @@ struct page *huge_zero_page __read_mostly;
  * Values of 0 indicate that the value is unset. Otherwise, the PID must be a
  * valid process ID and huge_addr must be a 2MB-aligned address.
  */
-static pid_t huge_addr_pid = 0;
-static u64 huge_addr = 0;
+pid_t huge_addr_pid = 0;
+u64 huge_addr = 0;
+
+bool huge_addr_enabled(struct vm_area_struct *vma)
+{
+	pid_t vma_owner_pid;
+
+	if (huge_addr_pid == 0 || huge_addr == 0) {
+		return false;
+	}
+
+	rcu_read_lock();
+	vma_owner_pid = vma->vm_mm->owner->pid;
+	rcu_read_unlock();
+
+	if (vma_owner_pid != huge_addr_pid) {
+		return false;
+	}
+
+	// We need to be a bit careful about partial overlap...
+	if ((vma->vm_start <= huge_addr && vma->vm_end < (huge_addr + PAGE_PMD_SIZE)) ||
+	    (vma->vm_start > huge_addr && vma->vm_end >= (huge_addr + PAGE_PMD_SIZE)))
+	{
+		// Partial overlap with beginning or end of huge page.
+		pr_info("Partial overlapping VMA (%0lx-%0lx) with huge page (%0x).\n",
+				vma->vm_start, vma->vm_end, huge_addr);
+		return false;
+	}
+
+	// Found a matching VMA!
+	if (vma->vm_start <= huge_addr && vma->vm_end >= (huge_addr + PAGE_PMD_SIZE)) {
+		pr_info("Found matching huge page.\n");
+		return true;
+	}
+
+	// Any other case.
+	return false;
+}
 
 bool transparent_hugepage_enabled(struct vm_area_struct *vma)
 {
@@ -332,7 +368,7 @@ static ssize_t huge_addr_show(struct kobject *kobj,
 
 static void try_huge_addr_promote(pid_t pid, u64 addr)
 {
-	// TODO
+	// TODO(markm)
 }
 
 static ssize_t huge_addr_store(struct kobject *kobj,
