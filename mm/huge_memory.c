@@ -90,17 +90,17 @@ bool huge_addr_enabled(struct vm_area_struct *vma)
 	}
 
 	// We need to be a bit careful about partial overlap...
-	if ((vma->vm_start <= huge_addr && vma->vm_end < (huge_addr + PAGE_PMD_SIZE)) ||
-	    (vma->vm_start > huge_addr && vma->vm_end >= (huge_addr + PAGE_PMD_SIZE)))
+	if ((vma->vm_start <= huge_addr && vma->vm_end < (huge_addr + HPAGE_PMD_SIZE)) ||
+	    (vma->vm_start > huge_addr && vma->vm_end >= (huge_addr + HPAGE_PMD_SIZE)))
 	{
 		// Partial overlap with beginning or end of huge page.
-		pr_info("Partial overlapping VMA (%0lx-%0lx) with huge page (%0x).\n",
+		pr_info("Partial overlapping VMA (%0lx-%0lx) with huge page (%0llx).\n",
 				vma->vm_start, vma->vm_end, huge_addr);
 		return false;
 	}
 
 	// Found a matching VMA!
-	if (vma->vm_start <= huge_addr && vma->vm_end >= (huge_addr + PAGE_PMD_SIZE)) {
+	if (vma->vm_start <= huge_addr && vma->vm_end >= (huge_addr + HPAGE_PMD_SIZE)) {
 		pr_info("Found matching huge page.\n");
 		return true;
 	}
@@ -371,7 +371,7 @@ static void try_huge_addr_promote(pid_t pid, u64 addr)
 	struct task_struct *target_task = pid_task(find_get_pid(pid), PIDTYPE_PID);
 	struct mm_struct *mm = target_task->mm;
 
-	int ret = do_madvise(target_task, mm, addr, PAGE_PMD_SIZE, MADV_HUGEPAGE);
+	int ret = do_madvise(target_task, mm, addr, HPAGE_PMD_SIZE, MADV_HUGEPAGE);
 
 	if (ret) {
 		pr_warn("Unable to madvise huge_addr: %d", ret);
