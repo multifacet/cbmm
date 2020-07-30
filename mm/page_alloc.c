@@ -914,7 +914,7 @@ static inline void __free_one_page(struct page *page,
 	unsigned long combined_pfn;
 	unsigned long uninitialized_var(buddy_pfn);
 	struct page *buddy;
-	unsigned int max_order;
+	unsigned int max_order, i;
 	struct capture_control *capc = task_capc(zone);
 
 	max_order = min_t(unsigned int, MAX_ORDER, pageblock_order + 1);
@@ -930,6 +930,9 @@ static inline void __free_one_page(struct page *page,
 	VM_BUG_ON_PAGE(bad_range(zone, page), page);
 
 continue_merging:
+	for (i = 0; i < (1 << order); i++)
+		ClearPageZeroed(page + i);
+
 	while (order < max_order - 1) {
 		if (compaction_capture(capc, page, order, migratetype)) {
 			__mod_zone_freepage_state(zone, -(1 << order),
@@ -1128,7 +1131,8 @@ static void kernel_init_free_pages(struct page *page, int numpages)
 	u64 start = rdtsc();
 
 	for (i = 0; i < numpages; i++)
-		clear_highpage(page + i);
+		if (!PageZeroed(page + i))
+			clear_highpage(page + i);
 
 	get_cpu_var(pftrace_alloc_zeroed_page) = true;
 	get_cpu_var(pftrace_alloc_zeroing_duration) = rdtsc() - start;
@@ -3056,6 +3060,7 @@ static void free_unref_page_commit(struct page *page, unsigned long pfn)
 		migratetype = MIGRATE_MOVABLE;
 	}
 
+	ClearPageZeroed(page);
 	pcp = &this_cpu_ptr(zone->pageset)->pcp;
 	list_add(&page->lru, &pcp->lists[migratetype]);
 	pcp->count++;

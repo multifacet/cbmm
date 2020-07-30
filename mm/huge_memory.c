@@ -1079,7 +1079,8 @@ static vm_fault_t __do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 	}
 
 	pftrace->prep_start_tsc = rdtsc();
-	clear_huge_page(page, vmf->address, HPAGE_PMD_NR);
+	if(!PageZeroed(page))
+		clear_huge_page(page, vmf->address, HPAGE_PMD_NR);
 	pftrace->prep_end_tsc = rdtsc();
 	/*
 	 * The memory barrier inside __SetPageUptodate makes sure that

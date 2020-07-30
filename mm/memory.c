@@ -5222,6 +5222,8 @@ static void clear_subpage(unsigned long addr, int idx, void *arg)
 {
 	struct page *page = arg;
 
+	if (PageZeroed(page + idx)) return;
+
 	clear_user_highpage(page + idx, addr);
 }
 
