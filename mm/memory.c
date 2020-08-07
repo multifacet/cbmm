@@ -4734,13 +4734,27 @@ void clear_huge_page(struct page *page,
 	unsigned long addr = addr_hint &
 		~(((unsigned long)pages_per_huge_page << PAGE_SHIFT) - 1);
 	u64 start = rdtsc();
+	void *tmp;
 
 	if (unlikely(pages_per_huge_page > MAX_ORDER_NR_PAGES)) {
 		clear_gigantic_page(page, addr, pages_per_huge_page);
 		return;
 	}
 
-	process_huge_page(addr_hint, pages_per_huge_page, clear_subpage, page);
+	//process_huge_page(addr_hint, pages_per_huge_page, clear_subpage, page);
+	tmp = vmap(&page, pages_per_huge_page, VM_WRITE,
+			__pgprot(PAGE_KERNEL | _PAGE_PRESENT | _PAGE_RW));
+	BUG_ON(tmp == NULL);
+
+	asm volatile ("cld\n"
+			"xor %%eax, %%eax\n"
+			"rep stosb\n"
+			: /* no output */
+			: "D"(tmp), "c"(PMD_PAGE_SIZE)
+			: "eax"
+		     );
+
+	vunmap(tmp);
 
 	mm_stats_hist_measure(&mm_huge_page_fault_clear_cycles, rdtsc() - start);
 }
