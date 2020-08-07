@@ -4735,6 +4735,7 @@ void clear_huge_page(struct page *page,
 		~(((unsigned long)pages_per_huge_page << PAGE_SHIFT) - 1);
 	u64 start = rdtsc();
 	void *tmp;
+	int i;
 
 	if (unlikely(pages_per_huge_page > MAX_ORDER_NR_PAGES)) {
 		clear_gigantic_page(page, addr, pages_per_huge_page);
@@ -4742,7 +4743,9 @@ void clear_huge_page(struct page *page,
 	}
 
 	//process_huge_page(addr_hint, pages_per_huge_page, clear_subpage, page);
-	tmp = vmap(&page, pages_per_huge_page, VM_WRITE,
+	struct page* pages[512];
+	for (int i = 0; i < 512; ++i) pages[i] = &page[i];
+	tmp = vmap(pages, pages_per_huge_page, VM_WRITE,
 			__pgprot(_PAGE_PRESENT | _PAGE_RW));
 	BUG_ON(tmp == NULL);
 
