@@ -4743,7 +4743,7 @@ void clear_huge_page(struct page *page,
 
 	//process_huge_page(addr_hint, pages_per_huge_page, clear_subpage, page);
 	tmp = vmap(&page, pages_per_huge_page, VM_WRITE,
-			__pgprot(PAGE_KERNEL | _PAGE_PRESENT | _PAGE_RW));
+			__pgprot(_PAGE_PRESENT | _PAGE_RW));
 	BUG_ON(tmp == NULL);
 
 	asm volatile ("cld\n"
