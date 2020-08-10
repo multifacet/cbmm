@@ -93,16 +93,16 @@ extern unsigned long transparent_hugepage_flags;
 extern pid_t huge_addr_pid;
 extern u64 huge_addr;
 
-bool huge_addr_enabled(struct vm_area_struct *vma);
+bool huge_addr_enabled(struct vm_area_struct *vma, unsigned long address);
 
 /*
  * to be used on vmas which are known to support THP.
  * Use transparent_hugepage_enabled otherwise
  */
-static inline bool __transparent_hugepage_enabled(struct vm_area_struct *vma)
+static inline bool __transparent_hugepage_enabled(struct vm_area_struct *vma, unsigned long address)
 {
 	// markm: if huge_addr is on, use a huge page no matter what...
-	if (huge_addr_enabled(vma))
+	if (huge_addr_enabled(vma, address))
 		return true;
 
 	if (vma->vm_flags & VM_NOHUGEPAGE)
@@ -132,7 +132,7 @@ static inline bool __transparent_hugepage_enabled(struct vm_area_struct *vma)
 	return false;
 }
 
-bool transparent_hugepage_enabled(struct vm_area_struct *vma);
+bool transparent_hugepage_enabled(struct vm_area_struct *vma, unsigned long address);
 
 #define HPAGE_CACHE_INDEX_MASK (HPAGE_PMD_NR - 1)
 
@@ -303,7 +303,7 @@ static inline bool __transparent_hugepage_enabled(struct vm_area_struct *vma)
 	return false;
 }
 
-static inline bool transparent_hugepage_enabled(struct vm_area_struct *vma)
+static inline bool transparent_hugepage_enabled(struct vm_area_struct *vma, unsigned long address)
 {
 	return false;
 }

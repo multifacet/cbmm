@@ -69,18 +69,26 @@ struct page *huge_zero_page __read_mostly;
  *
  * Values of 0 indicate that the value is unset. Otherwise, the PID must be a
  * valid process ID and huge_addr must be a 2MB-aligned address.
+ *
+ * The mode toggles different modes of operations:
+ *   0: use huge_addr as a single address to make huge
+ *   1: use huge_addr as the highest allowed huge page
+ *   2: use huge_addr as the lowest allowed huge page
  */
+int huge_addr_mode = 0;
 pid_t huge_addr_pid = 0;
 u64 huge_addr = 0;
 
-bool huge_addr_enabled(struct vm_area_struct *vma)
+bool huge_addr_enabled(struct vm_area_struct *vma, unsigned long address)
 {
 	pid_t vma_owner_pid;
+	unsigned long fault_address_aligned = address & PMD_PAGE_MASK;
 
 	if (huge_addr_pid == 0 || huge_addr == 0) {
 		return false;
 	}
 
+	// Check the PID of the faulting process...
 	rcu_read_lock();
 	vma_owner_pid = vma->vm_mm->owner->pid;
 	rcu_read_unlock();
@@ -89,27 +97,35 @@ bool huge_addr_enabled(struct vm_area_struct *vma)
 		return false;
 	}
 
-	// We need to be a bit careful about partial overlap...
-	if ((vma->vm_start <= huge_addr && vma->vm_end < (huge_addr + HPAGE_PMD_SIZE)) ||
-	    (vma->vm_start > huge_addr && vma->vm_end >= (huge_addr + HPAGE_PMD_SIZE)))
-	{
-		// Partial overlap with beginning or end of huge page.
-		pr_info("Partial overlapping VMA (%0lx-%0lx) with huge page (%0llx).\n",
-				vma->vm_start, vma->vm_end, huge_addr);
-		return false;
-	}
+	// Check if the fault address is within the huge region...
+	switch (huge_addr_mode) {
+		case 0:
+			if (huge_addr == fault_address_aligned) {
+				return true;
+			}
+			break;
 
-	// Found a matching VMA!
-	if (vma->vm_start <= huge_addr && vma->vm_end >= (huge_addr + HPAGE_PMD_SIZE)) {
-		pr_info("Found matching huge page.\n");
-		return true;
+		case 1: // huge addr is highest, so true if lower
+			if (address < huge_addr) {
+				return true;
+			}
+			break;
+
+		case 2:
+			if (address >= huge_addr) {
+				return true;
+			}
+			break;
+
+		default:
+			BUG();
 	}
 
 	// Any other case.
 	return false;
 }
 
-bool transparent_hugepage_enabled(struct vm_area_struct *vma)
+bool transparent_hugepage_enabled(struct vm_area_struct *vma, unsigned long address)
 {
 	/* The addr is used to check if the vma size fits */
 	unsigned long addr = (vma->vm_end & HPAGE_PMD_MASK) - HPAGE_PMD_SIZE;
@@ -117,7 +133,7 @@ bool transparent_hugepage_enabled(struct vm_area_struct *vma)
 	if (!transhuge_vma_suitable(vma, addr))
 		return false;
 	if (vma_is_anonymous(vma))
-		return __transparent_hugepage_enabled(vma);
+		return __transparent_hugepage_enabled(vma, address);
 	if (vma_is_shmem(vma))
 		return shmem_huge_enabled(vma);
 
@@ -360,6 +376,37 @@ static ssize_t huge_addr_pid_store(struct kobject *kobj,
 static struct kobj_attribute huge_addr_pid_attr =
 	__ATTR(huge_addr_pid, 0644, huge_addr_pid_show, huge_addr_pid_store);
 
+static ssize_t huge_addr_mode_show(struct kobject *kobj,
+			   struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", huge_addr_mode);
+}
+
+static ssize_t huge_addr_mode_store(struct kobject *kobj,
+			       struct kobj_attribute *attr,
+			       const char *buf, size_t count)
+{
+	int mode;
+	int ret;
+
+	ret = kstrtoint(buf, 0, &mode);
+
+	if (ret != 0) {
+		huge_addr_mode = 0;
+		return ret;
+	}
+	else if (mode >= 0 && mode <= 2) {
+		huge_addr_mode = mode;
+		return count;
+	}
+	else {
+		huge_addr_mode = 0;
+		return -EINVAL;
+	}
+}
+static struct kobj_attribute huge_addr_mode_attr =
+	__ATTR(huge_addr_mode, 0644, huge_addr_mode_show, huge_addr_mode_store);
+
 static ssize_t huge_addr_show(struct kobject *kobj,
 			   struct kobj_attribute *attr, char *buf)
 {
@@ -462,6 +509,7 @@ static struct attribute *hugepage_attr[] = {
 #endif
 	&huge_addr_attr.attr,
 	&huge_addr_pid_attr.attr,
+	&huge_addr_mode_attr.attr,
 	NULL,
 };
 
@@ -1502,7 +1550,7 @@ vm_fault_t do_huge_pmd_wp_page(struct vm_fault *vmf, pmd_t orig_pmd)
 	get_page(page);
 	spin_unlock(vmf->ptl);
 alloc:
-	if (__transparent_hugepage_enabled(vma) &&
+	if (__transparent_hugepage_enabled(vma, vmf->address) &&
 	    !transparent_hugepage_debug_cow()) {
 		huge_gfp = alloc_hugepage_direct_gfpmask(vma);
 		new_page = alloc_hugepage_vma(huge_gfp, vma, haddr, HPAGE_PMD_ORDER);

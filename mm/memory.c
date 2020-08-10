@@ -4070,7 +4070,7 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	if (!vmf.pud)
 		return VM_FAULT_OOM;
 retry_pud:
-	if (pud_none(*vmf.pud) && __transparent_hugepage_enabled(vma)) {
+	if (pud_none(*vmf.pud) && __transparent_hugepage_enabled(vma, address)) {
 		// (markm) No entry present.
 
 		// (markm) run the estimator to check if we should create a 1GB page.
@@ -4113,7 +4113,7 @@ retry_pud:
 	if (pud_trans_unstable(vmf.pud))
 		goto retry_pud;
 
-	if (pmd_none(*vmf.pmd) && __transparent_hugepage_enabled(vma)) {
+	if (pmd_none(*vmf.pmd) && __transparent_hugepage_enabled(vma, address)) {
 		// (markm) No entry present.
 
 		// (markm) run the estimator to check if we should create a 2MB page.
