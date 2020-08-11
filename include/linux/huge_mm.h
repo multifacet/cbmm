@@ -95,6 +95,10 @@ extern u64 huge_addr;
 
 bool huge_addr_enabled(struct vm_area_struct *vma, unsigned long address);
 
+void promote_to_huge(struct mm_struct *mm,
+		struct vm_area_struct *vma,
+		unsigned long address);
+
 /*
  * to be used on vmas which are known to support THP.
  * Use transparent_hugepage_enabled otherwise

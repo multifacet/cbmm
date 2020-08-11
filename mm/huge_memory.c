@@ -418,11 +418,14 @@ static void try_huge_addr_promote(pid_t pid, u64 addr)
 	struct task_struct *target_task = pid_task(find_get_pid(pid), PIDTYPE_PID);
 	struct mm_struct *mm = target_task->mm;
 
-	int ret = do_madvise(mm, addr, HPAGE_PMD_SIZE, MADV_HUGEPAGE);
+	//int ret = do_madvise(mm, addr, HPAGE_PMD_SIZE, MADV_HUGEPAGE);
+	struct vm_area_struct *vma = find_vma(mm, addr);
 
-	if (ret) {
-		pr_warn("Unable to madvise huge_addr: %d", ret);
-	}
+	//if (ret) {
+	//	pr_warn("Unable to madvise huge_addr: %d", ret);
+	//}
+
+	promote_to_huge(mm, vma, addr);
 }
 
 static ssize_t huge_addr_store(struct kobject *kobj,

@@ -1246,6 +1246,34 @@ out:
 	return ret;
 }
 
+void promote_to_huge(struct mm_struct *mm,
+		struct vm_area_struct *vma,
+		unsigned long address)
+{
+	int ret;
+	struct page *hpage = NULL;
+
+	spin_lock(&khugepaged_mm_lock);
+
+	ret = khugepaged_scan_pmd(mm, vma, address, &hpage);
+
+	if (!ret) {
+		up_read(&mm->mmap_sem);
+	} else {
+		pr_warn("error while promoting: %d", ret);
+	}
+
+	if (!IS_ERR_OR_NULL(hpage)) {
+		put_page(hpage);
+	} else {
+		pr_warn("hpage is null or error");
+	}
+
+	pr_info("Successfully promoted %lx", address);
+
+	spin_unlock(&khugepaged_mm_lock);
+}
+
 static void collect_mm_slot(struct mm_slot *mm_slot)
 {
 	struct mm_struct *mm = mm_slot->mm;
