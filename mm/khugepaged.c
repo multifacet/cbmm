@@ -1115,6 +1115,7 @@ out_up_write:
 	up_write(&mm->mmap_sem);
 out_nolock:
 	trace_mm_collapse_huge_page(mm, isolated, result);
+	pr_info("results = %d", result);
 	return;
 out:
 	mem_cgroup_cancel_charge(new_page, memcg, true);
@@ -1250,23 +1251,19 @@ void promote_to_huge(struct mm_struct *mm,
 		struct vm_area_struct *vma,
 		unsigned long address)
 {
-	int ret;
+	int node;
 	struct page *hpage = NULL;
 
 	spin_lock(&khugepaged_mm_lock);
+	down_read(&mm->mmap_sem);
 
-	ret = khugepaged_scan_pmd(mm, vma, address, &hpage);
+	node = khugepaged_find_target_node();
+	collapse_huge_page(mm, address, &hpage, node, 512);
 
-	if (!ret) {
-		up_read(&mm->mmap_sem);
-	} else {
-		pr_warn("error while promoting: %d", ret);
-	}
-
-	if (!IS_ERR_OR_NULL(hpage)) {
-		put_page(hpage);
-	} else {
+	if (IS_ERR_OR_NULL(hpage)) {
 		pr_warn("hpage is null or error");
+	} else {
+		put_page(hpage);
 	}
 
 	pr_info("Successfully promoted %lx", address);
