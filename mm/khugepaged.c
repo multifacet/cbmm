@@ -863,10 +863,12 @@ khugepaged_alloc_page(struct page **hpage, gfp_t gfp, int node)
  */
 
 static int hugepage_vma_revalidate(struct mm_struct *mm, unsigned long address,
-		struct vm_area_struct **vmap)
+		struct vm_area_struct **vmap, bool force)
 {
 	struct vm_area_struct *vma;
 	unsigned long hstart, hend;
+
+	if (force) return 0;
 
 	if (unlikely(khugepaged_test_exit(mm)))
 		return SCAN_ANY_PROCESS;
@@ -895,7 +897,7 @@ static int hugepage_vma_revalidate(struct mm_struct *mm, unsigned long address,
 static bool __collapse_huge_page_swapin(struct mm_struct *mm,
 					struct vm_area_struct *vma,
 					unsigned long address, pmd_t *pmd,
-					int referenced)
+					int referenced, bool force)
 {
 	int swapped_in = 0;
 	vm_fault_t ret = 0;
@@ -924,7 +926,7 @@ static bool __collapse_huge_page_swapin(struct mm_struct *mm,
 		/* do_swap_page returns VM_FAULT_RETRY with released mmap_sem */
 		if (ret & VM_FAULT_RETRY) {
 			down_read(&mm->mmap_sem);
-			if (hugepage_vma_revalidate(mm, address, &vmf.vma)) {
+			if (hugepage_vma_revalidate(mm, address, &vmf.vma, force)) {
 				/* vma is no longer available, don't continue to swapin */
 				trace_mm_collapse_huge_page_swapin(mm, swapped_in, referenced, 0);
 				return false;
@@ -948,10 +950,11 @@ static bool __collapse_huge_page_swapin(struct mm_struct *mm,
 	return true;
 }
 
-static void collapse_huge_page(struct mm_struct *mm,
+static int collapse_huge_page(struct mm_struct *mm,
 				   unsigned long address,
 				   struct page **hpage,
-				   int node, int referenced)
+				   int node, int referenced,
+				   bool force)
 {
 	pmd_t *pmd, _pmd;
 	pte_t *pte;
@@ -989,7 +992,7 @@ static void collapse_huge_page(struct mm_struct *mm,
 	}
 
 	down_read(&mm->mmap_sem);
-	result = hugepage_vma_revalidate(mm, address, &vma);
+	result = hugepage_vma_revalidate(mm, address, &vma, force);
 	if (result) {
 		mem_cgroup_cancel_charge(new_page, memcg, true);
 		up_read(&mm->mmap_sem);
@@ -1009,7 +1012,7 @@ static void collapse_huge_page(struct mm_struct *mm,
 	 * If it fails, we release mmap_sem and jump out_nolock.
 	 * Continuing to collapse causes inconsistency.
 	 */
-	if (!__collapse_huge_page_swapin(mm, vma, address, pmd, referenced)) {
+	if (!__collapse_huge_page_swapin(mm, vma, address, pmd, referenced, force)) {
 		mem_cgroup_cancel_charge(new_page, memcg, true);
 		up_read(&mm->mmap_sem);
 		goto out_nolock;
@@ -1025,7 +1028,7 @@ static void collapse_huge_page(struct mm_struct *mm,
 	result = SCAN_ANY_PROCESS;
 	if (!mmget_still_valid(mm))
 		goto out;
-	result = hugepage_vma_revalidate(mm, address, &vma);
+	result = hugepage_vma_revalidate(mm, address, &vma, force);
 	if (result)
 		goto out;
 	/* check if the pmd is still valid */
@@ -1116,7 +1119,7 @@ out_up_write:
 out_nolock:
 	trace_mm_collapse_huge_page(mm, isolated, result);
 	pr_info("results = %d", result);
-	return;
+	return result;
 out:
 	mem_cgroup_cancel_charge(new_page, memcg, true);
 	goto out_up_write;
@@ -1239,7 +1242,7 @@ out_unmap:
 	if (ret) {
 		node = khugepaged_find_target_node();
 		/* collapse_huge_page will return with the mmap_sem released */
-		collapse_huge_page(mm, address, hpage, node, referenced);
+		collapse_huge_page(mm, address, hpage, node, referenced, /* force */ false);
 	}
 out:
 	trace_mm_khugepaged_scan_pmd(mm, page, writable, referenced,
@@ -1252,13 +1255,14 @@ void promote_to_huge(struct mm_struct *mm,
 		unsigned long address)
 {
 	int node;
+	int result;
 	struct page *hpage = NULL;
 
 	spin_lock(&khugepaged_mm_lock);
 	down_read(&mm->mmap_sem);
 
 	node = khugepaged_find_target_node();
-	collapse_huge_page(mm, address, &hpage, node, 512);
+	result = collapse_huge_page(mm, address, &hpage, node, 512, /* force */ true);
 
 	if (IS_ERR_OR_NULL(hpage)) {
 		pr_warn("hpage is null or error");
@@ -1266,7 +1270,8 @@ void promote_to_huge(struct mm_struct *mm,
 		put_page(hpage);
 	}
 
-	pr_info("Successfully promoted %lx", address);
+	pr_info("Attempted to promote %lx: result=%d hpage=%p",
+			address, result, hpage);
 
 	spin_unlock(&khugepaged_mm_lock);
 }
