@@ -19,6 +19,7 @@
 #include <linux/efi.h>			/* efi_recover_from_page_fault()*/
 #include <linux/mm_types.h>
 #include <linux/mm_stats.h>
+#include <linux/huge_mm.h>
 
 #include <asm/cpufeature.h>		/* boot_cpu_has, ...		*/
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
@@ -1475,6 +1476,11 @@ good_area:
 	if (unlikely(fault & VM_FAULT_ERROR)) {
 		mm_fault_error(regs, hw_error_code, address, fault);
 		return is_huge;
+	}
+
+	// markm: check if we should promote the recently created page.
+	if (huge_addr_enabled(vma, address & HPAGE_PMD_MASK)) {
+		promote_to_huge(mm, vma, address & HPAGE_PMD_MASK);
 	}
 
 	/*
