@@ -106,7 +106,10 @@ void get_page_mapping(unsigned long address, unsigned long *pfn,
 		return;
 	}
 
+	pr_warn("dump_mapping: using task pid %d, comm=%16s, mm=%p",
+			huge_addr_pid, task->comm, task->mm);
 	mm = task->mm;
+	down_read(&mm->mmap_sem);
 
 	// Walk the page table until we find the mapping or confirm there is
 	// none.
@@ -117,7 +120,7 @@ void get_page_mapping(unsigned long address, unsigned long *pfn,
 	}
 
 	p4d = p4d_offset(pgd, address);
-	if (p4d_none(*p4d) || unlikely(p4d_bad(*p4d))){
+	if (p4d_none(*p4d) || unlikely(p4d_bad(*p4d))) {
 		pr_warn("Unable to get p4d (pgd->p4d->pud->pmd->pte->page).");
 		goto out;
 	}
@@ -133,12 +136,19 @@ void get_page_mapping(unsigned long address, unsigned long *pfn,
 		pr_warn("Unable to get pmd (pgd->p4d->pud->pmd->pte->page).");
 		goto out;
 	}
-	if (pmd_huge(*pmd) | pmd_trans_huge(*pmd)) {
-		*is_huge = true;
-		*page = pmd_to_page(pmd);
-		*pfn = page_to_pfn(*page);
-		pr_warn("dump_mapping: found huge page");
-		goto out;
+	if (pmd_trans_huge(*pmd) || unlikely(pmd_huge(*pmd))) {
+		spinlock_t *ptl = pmd_lock(mm, pmd);
+		if (pmd_trans_huge(*pmd) || unlikely(pmd_huge(*pmd))) {
+			*is_huge = true;
+			*page = pmd_page(*pmd);
+			*pfn = page_to_pfn(*page);
+
+			spin_unlock(ptl);
+
+			pr_warn("dump_mapping: found huge page");
+			goto out;
+		}
+		spin_unlock(ptl);
 	}
 
 	ptep = pte_offset_map(pmd, address);
@@ -153,6 +163,7 @@ void get_page_mapping(unsigned long address, unsigned long *pfn,
 	*page = pfn_to_page(*pfn);
 
 out:
+	up_read(&mm->mmap_sem);
 	put_task_struct(task);
 	return;
 }
