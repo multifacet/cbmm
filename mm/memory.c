@@ -73,6 +73,8 @@
 #include <linux/numa.h>
 #include <linux/mm_econ.h>
 #include <linux/mm_stats.h>
+#include <linux/proc_fs.h>
+#include <linux/memory.h>
 
 #include <trace/events/kmem.h>
 
@@ -108,6 +110,80 @@ EXPORT_SYMBOL(mem_map);
  */
 void *high_memory;
 EXPORT_SYMBOL(high_memory);
+
+static unsigned long dump_mapping;
+static struct proc_dir_entry *dump_mapping_ent;
+
+static ssize_t dump_mapping_read_cb(
+		struct file *file, char __user *ubuf,
+		size_t count, loff_t *ppos)
+{
+	char buf[100];
+	int len=0;
+	unsigned long pfn = 0;
+	struct page *page = NULL;
+	bool is_huge = false;
+
+	if(*ppos > 0)
+		return 0;
+
+	get_page_mapping(dump_mapping, &pfn, &page, &is_huge);
+
+	if (page) {
+		len += sprintf(buf, "0x%lx pfn=0x%lx sp=%p %s\n",
+				dump_mapping, pfn, page, is_huge ? "huge" : "base");
+	} else {
+		len += sprintf(buf, "0x%lx is not mapped\n", dump_mapping);
+	}
+
+	if(count < len)
+		return 0;
+
+	if(copy_to_user(ubuf, buf, len))
+		return -EFAULT;
+
+	*ppos = len;
+	return len;
+}
+
+static ssize_t dump_mapping_write_cb(
+		struct file *file, const char __user *ubuf,
+		size_t len, loff_t *offset)
+{
+	int num;
+	unsigned long val;
+	char input[20];
+
+	if(*offset > 0 || len > 20) {
+		return -EFAULT;
+	}
+
+	if(copy_from_user(input, ubuf, len)) {
+		return -EFAULT;
+	}
+
+	num = sscanf(input, "%lx", &val);
+	if(num != 1) {
+		return -EINVAL;
+	}
+
+	dump_mapping = val;
+
+	pr_warn("dump_mapping: 0x%lx\n", dump_mapping);
+
+	return len;
+}
+
+static struct file_operations dump_mapping_ops =
+{
+	.write = dump_mapping_write_cb,
+	.read = dump_mapping_read_cb,
+};
+
+void init_dump_mapping(void)
+{
+    dump_mapping_ent = proc_create("dump_mapping", 0444, NULL, &dump_mapping_ops);
+}
 
 /*
  * Randomize the address space (stacks, mmaps, brk, etc.).
@@ -3536,6 +3612,7 @@ static int __init fault_around_debugfs(void)
 {
 	debugfs_create_file_unsafe("fault_around_bytes", 0644, NULL, NULL,
 				   &fault_around_bytes_fops);
+	init_dump_mapping();
 	return 0;
 }
 late_initcall(fault_around_debugfs);

@@ -79,6 +79,84 @@ int huge_addr_mode = 0;
 pid_t huge_addr_pid = 0;
 u64 huge_addr = 0;
 
+void get_page_mapping(unsigned long address, unsigned long *pfn,
+		struct page **page, bool *is_huge)
+{
+	struct task_struct *task;
+	struct mm_struct *mm;
+	pgd_t *pgd;
+	p4d_t *p4d;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *ptep;
+
+	*pfn = 0;
+	*page = NULL;
+	*is_huge = false;
+
+	// Get the VMA. If the process or VMA no longer exist. Exit early.
+	if (huge_addr_pid == 0) {
+		pr_warn("dump_mapping: no pid specified");
+		return;
+	}
+
+	task = get_pid_task(find_get_pid(huge_addr_pid), PIDTYPE_PID);
+	if (!task) {
+		pr_warn("no such pid for dump_mapping");
+		return;
+	}
+
+	mm = task->mm;
+
+	// Walk the page table until we find the mapping or confirm there is
+	// none.
+	pgd = pgd_offset(mm, address);
+	if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd))) {
+		pr_warn("Unable to get pgd (pgd->p4d->pud->pmd->pte->page).");
+		goto out;
+	}
+
+	p4d = p4d_offset(pgd, address);
+	if (p4d_none(*p4d) || unlikely(p4d_bad(*p4d))){
+		pr_warn("Unable to get p4d (pgd->p4d->pud->pmd->pte->page).");
+		goto out;
+	}
+
+	pud = pud_offset(p4d, address);
+	if (pud_none(*pud) || unlikely(pud_bad(*pud))) {
+		pr_warn("Unable to get pud (pgd->p4d->pud->pmd->pte->page).");
+		goto out;
+	}
+
+	pmd = pmd_offset(pud, address);
+	if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd))) {
+		pr_warn("Unable to get pmd (pgd->p4d->pud->pmd->pte->page).");
+		goto out;
+	}
+	if (pmd_huge(*pmd) | pmd_trans_huge(*pmd)) {
+		*is_huge = true;
+		*page = pmd_to_page(pmd);
+		*pfn = page_to_pfn(*page);
+		pr_warn("dump_mapping: found huge page");
+		goto out;
+	}
+
+	ptep = pte_offset_map(pmd, address);
+	if (!pte_present(*ptep)) {
+		pr_warn("Unable to get pte (pgd->p4d->pud->pmd->pte->page).");
+		goto out;
+	}
+
+	// It's a base page
+	*is_huge = false;
+	*pfn = pte_pfn(*ptep);
+	*page = pfn_to_page(*pfn);
+
+out:
+	put_task_struct(task);
+	return;
+}
+
 bool huge_addr_enabled(struct vm_area_struct *vma, unsigned long address)
 {
 	pid_t vma_owner_pid;
@@ -425,13 +503,7 @@ static void try_huge_addr_promote(pid_t pid, u64 addr)
 	}
 
 	mm = target_task->mm;
-
-	//int ret = do_madvise(mm, addr, HPAGE_PMD_SIZE, MADV_HUGEPAGE);
 	vma = find_vma(mm, addr);
-
-	//if (ret) {
-	//	pr_warn("Unable to madvise huge_addr: %d", ret);
-	//}
 
 	promote_to_huge(mm, vma, addr);
 
