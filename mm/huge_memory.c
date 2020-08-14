@@ -96,17 +96,17 @@ void get_page_mapping(unsigned long address, unsigned long *pfn,
 
 	// Get the VMA. If the process or VMA no longer exist. Exit early.
 	if (huge_addr_pid == 0) {
-		pr_warn("dump_mapping: no pid specified");
+		pr_warn("dump_mapping: no pid specified\n");
 		return;
 	}
 
 	task = get_pid_task(find_get_pid(huge_addr_pid), PIDTYPE_PID);
 	if (!task) {
-		pr_warn("no such pid for dump_mapping");
+		pr_warn("no such pid for dump_mapping\n");
 		return;
 	}
 
-	pr_warn("dump_mapping: using task pid %d, comm=%16s, mm=%p",
+	pr_warn("dump_mapping: using task pid %d, comm=%16s, mm=%p\n",
 			huge_addr_pid, task->comm, task->mm);
 	mm = task->mm;
 	down_read(&mm->mmap_sem);
@@ -115,25 +115,25 @@ void get_page_mapping(unsigned long address, unsigned long *pfn,
 	// none.
 	pgd = pgd_offset(mm, address);
 	if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd))) {
-		pr_warn("Unable to get pgd (pgd->p4d->pud->pmd->pte->page).");
+		pr_warn("Unable to get pgd (pgd->p4d->pud->pmd->pte->page).\n");
 		goto out;
 	}
 
 	p4d = p4d_offset(pgd, address);
 	if (p4d_none(*p4d) || unlikely(p4d_bad(*p4d))) {
-		pr_warn("Unable to get p4d (pgd->p4d->pud->pmd->pte->page).");
+		pr_warn("Unable to get p4d (pgd->p4d->pud->pmd->pte->page).\n");
 		goto out;
 	}
 
 	pud = pud_offset(p4d, address);
 	if (pud_none(*pud) || unlikely(pud_bad(*pud))) {
-		pr_warn("Unable to get pud (pgd->p4d->pud->pmd->pte->page).");
+		pr_warn("Unable to get pud (pgd->p4d->pud->pmd->pte->page).\n");
 		goto out;
 	}
 
 	pmd = pmd_offset(pud, address);
 	if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd))) {
-		pr_warn("Unable to get pmd (pgd->p4d->pud->pmd->pte->page).");
+		pr_warn("Unable to get pmd (pgd->p4d->pud->pmd->pte->page).\n");
 		goto out;
 	}
 	if (pmd_trans_huge(*pmd) || unlikely(pmd_huge(*pmd))) {
@@ -145,7 +145,7 @@ void get_page_mapping(unsigned long address, unsigned long *pfn,
 
 			spin_unlock(ptl);
 
-			pr_warn("dump_mapping: found huge page");
+			pr_warn("dump_mapping: found huge page\n");
 			goto out;
 		}
 		spin_unlock(ptl);
@@ -153,7 +153,7 @@ void get_page_mapping(unsigned long address, unsigned long *pfn,
 
 	ptep = pte_offset_map(pmd, address);
 	if (!pte_present(*ptep)) {
-		pr_warn("Unable to get pte (pgd->p4d->pud->pmd->pte->page).");
+		pr_warn("Unable to get pte (pgd->p4d->pud->pmd->pte->page).\n");
 		goto out;
 	}
 
