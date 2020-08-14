@@ -133,7 +133,8 @@ void get_page_mapping(unsigned long address, unsigned long *pfn,
 
 	pmd = pmd_offset(pud, address);
 	if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd))) {
-		pr_warn("Unable to get pmd (pgd->p4d->pud->pmd->pte->page).\n");
+		pr_warn("Unable to get pmd (pgd->p4d->pud->pmd->pte->page): %lu.\n",
+				native_pmd_val(*pmd));
 		goto out;
 	}
 	if (pmd_trans_huge(*pmd) || unlikely(pmd_huge(*pmd))) {
