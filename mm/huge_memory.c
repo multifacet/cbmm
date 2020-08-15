@@ -84,10 +84,12 @@ void get_page_mapping(unsigned long address, unsigned long *pfn,
 {
 	struct task_struct *task;
 	struct mm_struct *mm;
+	struct vm_area_struct *vma;
 	pgd_t *pgd;
 	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
+	spinlock_t *ptl;
 	pte_t *ptep;
 
 	*pfn = 0;
@@ -111,6 +113,12 @@ void get_page_mapping(unsigned long address, unsigned long *pfn,
 	mm = task->mm;
 	down_read(&mm->mmap_sem);
 
+	vma = find_vma(mm, address);
+	if (!vma) {
+		pr_warn("Unable to find VMA...\n");
+		goto out;
+	}
+
 	// Walk the page table until we find the mapping or confirm there is
 	// none.
 	pgd = pgd_offset(mm, address);
@@ -132,24 +140,38 @@ void get_page_mapping(unsigned long address, unsigned long *pfn,
 	}
 
 	pmd = pmd_offset(pud, address);
-	if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd))) {
+	if (pmd_none(*pmd)) {
 		pr_warn("Unable to get pmd (pgd->p4d->pud->pmd->pte->page): %lx.\n",
 				native_pmd_val(*pmd));
 		goto out;
 	}
-	if (pmd_trans_huge(*pmd) || unlikely(pmd_huge(*pmd))) {
-		spinlock_t *ptl = pmd_lock(mm, pmd);
-		if (pmd_trans_huge(*pmd) || unlikely(pmd_huge(*pmd))) {
+
+	ptl = pmd_trans_huge_lock(pmd, vma);
+	if (ptl) {
+		if (pmd_present(*pmd)) {
+			*page = follow_trans_huge_pmd(vma, address, pmd, 0);
+			if (IS_ERR_OR_NULL(page)) {
+				pr_warn("dump_mapping: unexpectedly unable to follow huge page\n");
+				*page = NULL;
+				spin_unlock(ptl);
+				goto out;
+			}
+			pr_warn("dump_mapping: found huge page\n");
+
 			*is_huge = true;
-			*page = pmd_page(*pmd);
 			*pfn = page_to_pfn(*page);
 
 			spin_unlock(ptl);
-
-			pr_warn("dump_mapping: found huge page\n");
 			goto out;
 		}
 		spin_unlock(ptl);
+	}
+
+	*page = NULL;
+
+	if (pmd_trans_unstable(pmd)) {
+		pr_warn("dump_mapping: Unstable THP pmd. Try again.\n");
+		goto out;
 	}
 
 	ptep = pte_offset_map(pmd, address);
