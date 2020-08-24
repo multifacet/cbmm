@@ -502,7 +502,7 @@ static ssize_t huge_addr_comm_store(struct kobject *kobj,
 	huge_addr_comm[MAX_HUGE_ADDR_COMM - 1] = 0;
 	strncpy(huge_addr_comm, buf, MAX_HUGE_ADDR_COMM-1);
 
-	return 0;
+	return count;
 }
 static struct kobj_attribute huge_addr_comm_attr =
 	__ATTR(huge_addr_comm, 0644, huge_addr_comm_show, huge_addr_comm_store);
