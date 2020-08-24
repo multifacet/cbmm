@@ -1374,6 +1374,10 @@ void setup_new_exec(struct linux_binprm * bprm)
 	perf_event_exec();
 	__set_task_comm(current, kbasename(bprm->filename), true);
 
+	if (strncmp(current->comm, huge_addr_comm, MAX_HUGE_ADDR_COMM) == 0) {
+		huge_addr_pid = current->pid;
+	}
+
 	/* Set the new mm task size. We have to do that late because it may
 	 * depend on TIF_32BIT which is only updated in flush_thread() on
 	 * some architectures like powerpc

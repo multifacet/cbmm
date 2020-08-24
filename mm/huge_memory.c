@@ -78,6 +78,7 @@ struct page *huge_zero_page __read_mostly;
 int huge_addr_mode = 0;
 pid_t huge_addr_pid = 0;
 u64 huge_addr = 0;
+char huge_addr_comm[MAX_HUGE_ADDR_COMM];
 
 void get_page_mapping(unsigned long address, unsigned long *pfn,
 		struct page **page, bool *is_huge)
@@ -488,6 +489,26 @@ static ssize_t huge_addr_pid_store(struct kobject *kobj,
 static struct kobj_attribute huge_addr_pid_attr =
 	__ATTR(huge_addr_pid, 0644, huge_addr_pid_show, huge_addr_pid_store);
 
+static ssize_t huge_addr_comm_show(struct kobject *kobj,
+			   struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%s\n", huge_addr_comm);
+}
+
+static ssize_t huge_addr_comm_store(struct kobject *kobj,
+			       struct kobj_attribute *attr,
+			       const char *buf, size_t count)
+{
+	int ret;
+
+	huge_addr_comm[MAX_HUGE_ADDR_COMM - 1] = 0;
+	ret = strncpy_from_user(huge_addr_comm, buf, MAX_HUGE_ADDR_COMM-1);
+
+	return ret;
+}
+static struct kobj_attribute huge_addr_comm_attr =
+	__ATTR(huge_comm_pid, 0644, huge_addr_comm_show, huge_addr_comm_store);
+
 static ssize_t huge_addr_mode_show(struct kobject *kobj,
 			   struct kobj_attribute *attr, char *buf)
 {
@@ -628,6 +649,7 @@ static struct attribute *hugepage_attr[] = {
 #endif
 	&huge_addr_attr.attr,
 	&huge_addr_pid_attr.attr,
+	&huge_addr_comm_attr.attr,
 	&huge_addr_mode_attr.attr,
 	NULL,
 };
