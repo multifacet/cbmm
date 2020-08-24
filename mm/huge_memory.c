@@ -499,15 +499,13 @@ static ssize_t huge_addr_comm_store(struct kobject *kobj,
 			       struct kobj_attribute *attr,
 			       const char *buf, size_t count)
 {
-	int ret;
-
 	huge_addr_comm[MAX_HUGE_ADDR_COMM - 1] = 0;
-	ret = strncpy_from_user(huge_addr_comm, buf, MAX_HUGE_ADDR_COMM-1);
+	strncpy(huge_addr_comm, buf, MAX_HUGE_ADDR_COMM-1);
 
-	return ret;
+	return 0;
 }
 static struct kobj_attribute huge_addr_comm_attr =
-	__ATTR(huge_comm_pid, 0644, huge_addr_comm_show, huge_addr_comm_store);
+	__ATTR(huge_addr_comm, 0644, huge_addr_comm_show, huge_addr_comm_store);
 
 static ssize_t huge_addr_mode_show(struct kobject *kobj,
 			   struct kobj_attribute *attr, char *buf)
