@@ -1293,7 +1293,7 @@ bool do_user_addr_fault(struct pt_regs *regs,
 	struct mm_struct *mm;
 	vm_fault_t fault, major = 0;
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
-    bool is_huge = false;
+	bool is_huge = false;
 
 	tsk = current;
 	mm = tsk->mm;
@@ -1447,7 +1447,7 @@ good_area:
 	fault = handle_mm_fault(vma, address, flags);
 	major |= fault & VM_FAULT_MAJOR;
 
-    is_huge = !(fault & (VM_FAULT_OOM | VM_FAULT_BASE_PAGE));
+	is_huge = !(fault & (VM_FAULT_OOM | VM_FAULT_BASE_PAGE));
 
 	/*
 	 * If we need to retry the mmap_sem has already been released,
@@ -1479,7 +1479,7 @@ good_area:
 	}
 
 	// markm: check if we should promote the recently created page.
-	if (huge_addr_enabled(vma, address & HPAGE_PMD_MASK)) {
+	if (!is_huge && huge_addr_enabled(vma, address & HPAGE_PMD_MASK)) {
 		promote_to_huge(mm, vma, address & HPAGE_PMD_MASK);
 	}
 
@@ -1497,7 +1497,7 @@ good_area:
 
 	check_v8086_mode(regs, address, tsk);
 
-    return is_huge;
+	return is_huge;
 }
 NOKPROBE_SYMBOL(do_user_addr_fault);
 

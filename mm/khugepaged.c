@@ -1258,6 +1258,8 @@ void promote_to_huge(struct mm_struct *mm,
 	int result;
 	struct page *hpage = NULL;
 
+	pr_info("Attempting to promote %lx", address);
+
 	spin_lock(&khugepaged_mm_lock);
 	down_read(&mm->mmap_sem);
 
@@ -1270,10 +1272,10 @@ void promote_to_huge(struct mm_struct *mm,
 		put_page(hpage);
 	}
 
+	spin_unlock(&khugepaged_mm_lock);
+
 	pr_info("Attempted to promote %lx: result=%d hpage=%p",
 			address, result, hpage);
-
-	spin_unlock(&khugepaged_mm_lock);
 }
 
 static void collect_mm_slot(struct mm_slot *mm_slot)
