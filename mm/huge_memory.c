@@ -192,6 +192,7 @@ out:
 	return;
 }
 
+// Is huge_addr enabled for the huge page containing `address`?
 bool huge_addr_enabled(struct vm_area_struct *vma, unsigned long address)
 {
 	pid_t vma_owner_pid;
@@ -207,6 +208,13 @@ bool huge_addr_enabled(struct vm_area_struct *vma, unsigned long address)
 	rcu_read_unlock();
 
 	if (vma_owner_pid != huge_addr_pid) {
+		return false;
+	}
+
+	// Check if the fault address's vma is large enough for a huge page.
+	if (vma->vm_start > fault_address_aligned ||
+	    vma->vm_end <= (fault_address_aligned + HPAGE_PMD_SIZE))
+	{
 		return false;
 	}
 
