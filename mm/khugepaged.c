@@ -999,6 +999,8 @@ static int collapse_huge_page(struct mm_struct *mm,
 		goto out_nolock;
 	}
 
+	pr_info("promoting: vma=%p", vma);
+
 	pmd = mm_find_pmd(mm, address);
 	if (!pmd) {
 		result = SCAN_PMD_NULL;
@@ -1035,6 +1037,7 @@ static int collapse_huge_page(struct mm_struct *mm,
 	if (mm_find_pmd(mm, address) != pmd)
 		goto out;
 
+	pr_info("promoting 2: vma=%p", vma);
 	anon_vma_lock_write(vma->anon_vma);
 
 	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, NULL, mm,
@@ -1258,7 +1261,7 @@ void promote_to_huge(struct mm_struct *mm,
 	int result;
 	struct page *hpage = NULL;
 
-	pr_info("Attempting to promote %lx", address);
+	pr_info("Attempting to promote %lx (vma=%p mm=%p)", address, vma, mm);
 
 	spin_lock(&khugepaged_mm_lock);
 	down_read(&mm->mmap_sem);

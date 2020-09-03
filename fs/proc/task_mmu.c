@@ -584,8 +584,8 @@ static void smaps_pmd_entry(pmd_t *pmd, unsigned long addr,
 		return;
 	if (PageAnon(page)) {
 		mss->anonymous_thp += HPAGE_PMD_SIZE;
-		pr_warn("found anon page: pmd=%lx va=%lx\n",
-				native_pmd_val(*pmd), addr);
+		//pr_warn("found anon page: pmd=%lx va=%lx\n",
+		//		native_pmd_val(*pmd), addr);
 	} else if (PageSwapBacked(page))
 		mss->shmem_thp += HPAGE_PMD_SIZE;
 	else if (is_zone_device_page(page))

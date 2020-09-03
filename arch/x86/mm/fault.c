@@ -1479,7 +1479,7 @@ good_area:
 	}
 
 	// markm: check if we should promote the recently created page.
-	if (!is_huge && huge_addr_enabled(vma, address & HPAGE_PMD_MASK)) {
+	if (!is_huge && huge_addr_enabled(vma, address)) {
 		promote_to_huge(mm, vma, address & HPAGE_PMD_MASK);
 	}
 
