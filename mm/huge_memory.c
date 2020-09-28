@@ -63,6 +63,11 @@ static struct shrinker deferred_split_shrinker;
 static atomic_t huge_zero_refcount;
 struct page *huge_zero_page __read_mostly;
 
+struct huge_addr_range {
+	u64 start;
+	u64 end;
+};
+
 /*
  * With the `huge_addr` sysfs flag, userspace can choose a single pid and
  * 2MB-aligned address to make into a huge page.
@@ -74,10 +79,13 @@ struct page *huge_zero_page __read_mostly;
  *   0: use huge_addr as a single address to make huge
  *   1: use huge_addr as the highest allowed huge page
  *   2: use huge_addr as the lowest allowed huge page
+ *   3: use huge_addr_ranges to see if a page should be huge
  */
 int huge_addr_mode = 0;
 pid_t huge_addr_pid = 0;
 u64 huge_addr = 0;
+struct huge_addr_range *huge_addr_ranges = NULL;
+int num_huge_addr_ranges = 0;
 char huge_addr_comm[MAX_HUGE_ADDR_COMM];
 
 void get_page_mapping(unsigned long address, unsigned long *pfn,
@@ -197,6 +205,7 @@ bool huge_addr_enabled(struct vm_area_struct *vma, unsigned long address)
 {
 	pid_t vma_owner_pid;
 	unsigned long fault_address_aligned = address & PMD_PAGE_MASK;
+	int i;
 
 	if (huge_addr_pid == 0 || huge_addr == 0) {
 		return false;
@@ -235,6 +244,16 @@ bool huge_addr_enabled(struct vm_area_struct *vma, unsigned long address)
 		case 2:
 			if (address >= huge_addr) {
 				return true;
+			}
+			break;
+
+		case 3:
+			for (i = 0; i < num_huge_addr_ranges; i++) {
+				if (address >= huge_addr_ranges[i].start &&
+					address < huge_addr_ranges[i].end)
+				{
+					return true;
+				}
 			}
 			break;
 
@@ -534,7 +553,7 @@ static ssize_t huge_addr_mode_store(struct kobject *kobj,
 		huge_addr_mode = 0;
 		return ret;
 	}
-	else if (mode >= 0 && mode <= 2) {
+	else if (mode >= 0 && mode <= 3) {
 		huge_addr_mode = mode;
 		return count;
 	}
@@ -549,7 +568,20 @@ static struct kobj_attribute huge_addr_mode_attr =
 static ssize_t huge_addr_show(struct kobject *kobj,
 			   struct kobj_attribute *attr, char *buf)
 {
-	return sprintf(buf, "0x%llx\n", huge_addr);
+	if (huge_addr_mode == 3) {
+		int write_cnt = 0;
+		int i;
+
+		for (i = 0; i < num_huge_addr_ranges; i++) {
+			write_cnt += sprintf(&buf[write_cnt], "0x%llx 0x%llx;",
+				huge_addr_ranges[i].start, huge_addr_ranges[i].end);
+		}
+		write_cnt += sprintf(&buf[write_cnt], "\n");
+
+		return write_cnt;
+	} else {
+		return sprintf(buf, "0x%llx\n", huge_addr);
+	}
 }
 
 static void try_huge_addr_promote(pid_t pid, u64 addr)
@@ -578,24 +610,84 @@ static ssize_t huge_addr_store(struct kobject *kobj,
 	u64 addr;
 	int ret;
 
-	ret = kstrtoull(buf, 0, &addr);
+	if (huge_addr_mode == 3) {
+		char *tok = (char *)buf;
+		struct huge_addr_range *ranges;
+		int num_ranges;
+		int i;
 
-	if (ret != 0) {
-		huge_addr = 0;
-		return ret;
-	} else if ((addr & PMD_PAGE_MASK) == addr) {
-		huge_addr = addr;
-
-		// If the pid is set, the we should check if the page is
-		// already mapped. If so, then we should promote it.
-		if (huge_addr_pid != 0) {
-			try_huge_addr_promote(huge_addr_pid, huge_addr);
+		// First, count how many ranges needed
+		// Start with 1 in case the last line doesn't end with a newline
+		num_ranges = 1;
+		for (i = 0; i < count; i++) {
+			if (buf[i] == ';')
+				num_ranges++;
 		}
 
+		ranges = kmalloc(sizeof(struct huge_addr_range) * num_ranges, GFP_KERNEL);
+		if (!ranges)
+			return -ENOMEM;
+
+		// Try to read in all of the ranges
+		num_ranges = 0;
+		while (tok) {
+			char *addr_buf;
+
+			// Get the beginning of the range
+			addr_buf = strsep(&tok, " ");
+			if (!addr_buf)
+				goto err;
+
+			ret = kstrtoull(addr_buf, 0, &addr);
+			if (ret != 0)
+				goto err;
+
+			ranges[num_ranges].start = addr;
+
+			// Get the end of the range
+			addr_buf = strsep(&tok, ";");
+			if (!addr_buf)
+				goto err;
+
+			ret = kstrtoull(addr_buf, 0, &addr);
+			if (ret != 0)
+				goto err;
+
+			ranges[num_ranges].end = addr;
+
+			num_ranges++;
+		}
+
+		if (huge_addr_ranges)
+			kfree(huge_addr_ranges);
+		huge_addr_ranges = ranges;
+		num_huge_addr_ranges = num_ranges;
+
 		return count;
-	} else {
-		huge_addr = 0;
+
+err:
+		kfree(ranges);
 		return -EINVAL;
+	} else {
+		ret = kstrtoull(buf, 0, &addr);
+
+		if (ret != 0) {
+			huge_addr = 0;
+			return ret;
+		} else if ((addr & PMD_PAGE_MASK) == addr) {
+			huge_addr = addr;
+
+			// If the pid is set, the we should check if the page is
+			// already mapped. If so, then we should promote it.
+			if (huge_addr_pid != 0) {
+				try_huge_addr_promote(huge_addr_pid, huge_addr);
+			}
+
+			return count;
+		} else {
+			huge_addr = 0;
+			return -EINVAL;
+		}
 	}
 }
 static struct kobj_attribute huge_addr_attr =
