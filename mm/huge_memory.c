@@ -268,7 +268,7 @@ bool huge_addr_enabled(struct vm_area_struct *vma, unsigned long address)
 	pid_t vma_owner_pid;
 	unsigned long fault_address_aligned = address & PMD_PAGE_MASK;
 
-	if (huge_addr_pid == 0 || huge_addr == 0) {
+	if (huge_addr_pid == 0 || (huge_addr == 0 && huge_addr_mode != 3)) {
 		return false;
 	}
 
