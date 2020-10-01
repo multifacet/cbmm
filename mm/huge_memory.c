@@ -34,6 +34,7 @@
 #include <linux/numa.h>
 #include <linux/page_owner.h>
 #include <linux/mm_stats.h>
+#include <linux/rbtree.h>
 
 #include <asm/tlb.h>
 #include <asm/pgalloc.h>
@@ -64,6 +65,7 @@ static atomic_t huge_zero_refcount;
 struct page *huge_zero_page __read_mostly;
 
 struct huge_addr_range {
+	struct rb_node node;
 	u64 start;
 	u64 end;
 };
@@ -84,8 +86,7 @@ struct huge_addr_range {
 int huge_addr_mode = 0;
 pid_t huge_addr_pid = 0;
 u64 huge_addr = 0;
-struct huge_addr_range *huge_addr_ranges = NULL;
-int num_huge_addr_ranges = 0;
+struct rb_root huge_addr_range_tree = RB_ROOT;
 char huge_addr_comm[MAX_HUGE_ADDR_COMM];
 
 void get_page_mapping(unsigned long address, unsigned long *pfn,
@@ -200,12 +201,72 @@ out:
 	return;
 }
 
+static void huge_addr_range_insert(struct rb_root *root, struct huge_addr_range *new_range)
+{
+	struct rb_node **link = &root->rb_node;
+	struct rb_node *parent = NULL;
+	struct huge_addr_range *range;
+	u64 start = new_range->start;
+
+	while (*link) {
+		parent = *link;
+		range = rb_entry(parent, struct huge_addr_range, node);
+
+		if (start < range->start)
+			link = &(*link)->rb_left;
+		else if (start > range->start)
+			link = &(*link)->rb_right;
+		else {
+			range->end = new_range->end;
+			return;
+		}
+	}
+
+	rb_link_node(&new_range->node, parent, link);
+	rb_insert_color(&new_range->node, root);
+}
+
+static bool huge_addr_in_range(u64 addr)
+{
+	struct rb_node *node = huge_addr_range_tree.rb_node;
+	struct huge_addr_range *range;
+
+	while (node) {
+		range = rb_entry(node, struct huge_addr_range, node);
+
+		if (addr < range->start)
+			node = node->rb_left;
+		else if (addr >= range->start && addr < range->end)
+			return true;
+		else
+			node = node->rb_right;
+	}
+
+	return false;
+}
+
+static void huge_addr_free_tree(struct rb_root *root)
+{
+	struct huge_addr_range *range;
+	struct rb_node *node, *next;
+
+	node = rb_first(root);
+
+	while (node) {
+		next = rb_next(node);
+
+		range = rb_entry(node, struct huge_addr_range, node);
+		kfree(range);
+
+		node = next;
+	}
+}
+
 // Is huge_addr enabled for the huge page containing `address`?
 bool huge_addr_enabled(struct vm_area_struct *vma, unsigned long address)
 {
 	pid_t vma_owner_pid;
 	unsigned long fault_address_aligned = address & PMD_PAGE_MASK;
-	int i;
 
 	if (huge_addr_pid == 0 || huge_addr == 0) {
 		return false;
@@ -248,12 +309,8 @@ bool huge_addr_enabled(struct vm_area_struct *vma, unsigned long address)
 			break;
 
 		case 3:
-			for (i = 0; i < num_huge_addr_ranges; i++) {
-				if (address >= huge_addr_ranges[i].start &&
-					address < huge_addr_ranges[i].end)
-				{
-					return true;
-				}
+			if (huge_addr_in_range(address)) {
+				return true;
 			}
 			break;
 
@@ -570,13 +627,19 @@ static ssize_t huge_addr_show(struct kobject *kobj,
 {
 	if (huge_addr_mode == 3) {
 		int write_cnt = 0;
-		int i;
+		struct huge_addr_range *range;
+		struct rb_node *node = rb_first(&huge_addr_range_tree);
 
-		for (i = 0; i < num_huge_addr_ranges; i++) {
+		while (node) {
+			range = rb_entry(node, struct huge_addr_range, node);
+
 			write_cnt += sprintf(&buf[write_cnt], "0x%llx 0x%llx;",
-				huge_addr_ranges[i].start, huge_addr_ranges[i].end);
+				range->start, range->end);
+
+			node = rb_next(node);
 		}
-		write_cnt += sprintf(&buf[write_cnt], "\n");
+		//Replace the last ';' with a newline
+		buf[write_cnt - 1] = '\n';
 
 		return write_cnt;
 	} else {
@@ -612,62 +675,63 @@ static ssize_t huge_addr_store(struct kobject *kobj,
 
 	if (huge_addr_mode == 3) {
 		char *tok = (char *)buf;
-		struct huge_addr_range *ranges;
-		int num_ranges;
-		int i;
-
-		// First, count how many ranges needed
-		// Start with 1 in case the last line doesn't end with a newline
-		num_ranges = 1;
-		for (i = 0; i < count; i++) {
-			if (buf[i] == ';')
-				num_ranges++;
-		}
-
-		ranges = kmalloc(sizeof(struct huge_addr_range) * num_ranges, GFP_KERNEL);
-		if (!ranges)
-			return -ENOMEM;
+		struct rb_root new_tree = RB_ROOT;
+		ssize_t error;
 
 		// Try to read in all of the ranges
-		num_ranges = 0;
 		while (tok) {
+			struct huge_addr_range *range;
 			char *addr_buf;
+
+			range = kmalloc(sizeof(struct huge_addr_range), GFP_KERNEL);
+			if (!range) {
+				error = -ENOMEM;
+				goto err;
+			}
 
 			// Get the beginning of the range
 			addr_buf = strsep(&tok, " ");
-			if (!addr_buf)
+			if (!addr_buf) {
+				error = -EINVAL;
 				goto err;
+			}
 
 			ret = kstrtoull(addr_buf, 0, &addr);
-			if (ret != 0)
+			if (ret != 0) {
+				error = -EINVAL;
 				goto err;
+			}
 
-			ranges[num_ranges].start = addr;
+			range->start = addr;
 
 			// Get the end of the range
 			addr_buf = strsep(&tok, ";");
-			if (!addr_buf)
+			if (!addr_buf) {
+				error = -EINVAL;
 				goto err;
+			}
 
 			ret = kstrtoull(addr_buf, 0, &addr);
-			if (ret != 0)
+			if (ret != 0) {
+				error = -EINVAL;
 				goto err;
+			}
 
-			ranges[num_ranges].end = addr;
+			range->end = addr;
 
-			num_ranges++;
+			huge_addr_range_insert(&new_tree, range);
 		}
 
-		if (huge_addr_ranges)
-			kfree(huge_addr_ranges);
-		huge_addr_ranges = ranges;
-		num_huge_addr_ranges = num_ranges;
+		//Free the old tree if it exists
+		huge_addr_free_tree(&huge_addr_range_tree);
+		//Set the new tree
+		huge_addr_range_tree = new_tree;
 
 		return count;
 
 err:
-		kfree(ranges);
-		return -EINVAL;
+		huge_addr_free_tree(&new_tree);
+		return error;
 	} else {
 		ret = kstrtoull(buf, 0, &addr);
 
