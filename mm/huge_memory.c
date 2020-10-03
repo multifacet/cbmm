@@ -210,14 +210,14 @@ static void huge_addr_range_insert(struct rb_root *root, struct huge_addr_range 
 
 	while (*link) {
 		parent = *link;
-		range = rb_entry(parent, struct huge_addr_range, node);
+		range = container_of(parent, struct huge_addr_range, node);
 
 		if (start < range->start)
 			link = &(*link)->rb_left;
 		else if (start > range->start)
 			link = &(*link)->rb_right;
 		else {
-			range->end = new_range->end;
+			printk(KERN_WARNING "Cannot use the same start value in more than one range!\n");
 			return;
 		}
 	}
@@ -226,13 +226,13 @@ static void huge_addr_range_insert(struct rb_root *root, struct huge_addr_range 
 	rb_insert_color(&new_range->node, root);
 }
 
-static bool huge_addr_in_range(u64 addr)
+static bool huge_addr_in_range(struct rb_root *root, u64 addr)
 {
-	struct rb_node *node = huge_addr_range_tree.rb_node;
+	struct rb_node *node = root->rb_node;
 	struct huge_addr_range *range;
 
 	while (node) {
-		range = rb_entry(node, struct huge_addr_range, node);
+		range = container_of(node, struct huge_addr_range, node);
 
 		if (addr < range->start)
 			node = node->rb_left;
@@ -248,17 +248,12 @@ static bool huge_addr_in_range(u64 addr)
 static void huge_addr_free_tree(struct rb_root *root)
 {
 	struct huge_addr_range *range;
-	struct rb_node *node, *next;
+	struct rb_node *node;
 
-	node = rb_first(root);
-
-	while (node) {
-		next = rb_next(node);
-
-		range = rb_entry(node, struct huge_addr_range, node);
+	while ((node = rb_first(root))) {
+		range = container_of(node, struct huge_addr_range, node);
+		rb_erase(node, root);
 		kfree(range);
-
-		node = next;
 	}
 }
 
@@ -309,7 +304,7 @@ bool huge_addr_enabled(struct vm_area_struct *vma, unsigned long address)
 			break;
 
 		case 3:
-			if (huge_addr_in_range(address)) {
+			if (huge_addr_in_range(&huge_addr_range_tree, address)) {
 				return true;
 			}
 			break;
@@ -631,7 +626,7 @@ static ssize_t huge_addr_show(struct kobject *kobj,
 		struct rb_node *node = rb_first(&huge_addr_range_tree);
 
 		while (node) {
-			range = rb_entry(node, struct huge_addr_range, node);
+			range = container_of(node, struct huge_addr_range, node);
 
 			write_cnt += sprintf(&buf[write_cnt], "0x%llx 0x%llx;",
 				range->start, range->end);
@@ -676,11 +671,11 @@ static ssize_t huge_addr_store(struct kobject *kobj,
 	if (huge_addr_mode == 3) {
 		char *tok = (char *)buf;
 		struct rb_root new_tree = RB_ROOT;
+		struct huge_addr_range *range = NULL;
 		ssize_t error;
 
 		// Try to read in all of the ranges
 		while (tok) {
-			struct huge_addr_range *range;
 			char *addr_buf;
 
 			range = kmalloc(sizeof(struct huge_addr_range), GFP_KERNEL);
@@ -730,6 +725,8 @@ static ssize_t huge_addr_store(struct kobject *kobj,
 		return count;
 
 err:
+		if (range)
+			kfree(range);
 		huge_addr_free_tree(&new_tree);
 		return error;
 	} else {
