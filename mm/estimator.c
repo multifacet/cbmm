@@ -168,5 +168,8 @@ bool mm_decide(const struct mm_cost_delta *cost)
     } else if (mm_econ_mode == 1) {
         // TODO(markm): for now default to the normal linux behavior
         return true;
+    } else {
+        BUG();
+        return false;
     }
 }
