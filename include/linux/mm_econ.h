@@ -27,14 +27,20 @@ struct mm_action {
 
 // The cost of a particular action relative to the status quo.
 struct mm_cost_delta {
-    // Difference in the number of TLB misses.
-    s64 tlb_misses;
+    //// Difference in the number of TLB misses.
+    //s64 tlb_misses;
 
-    // Difference in the number of page faults.
-    s64 page_fault_freq;
+    //// Difference in the number of page faults.
+    //s64 page_fault_freq;
 
-    // CPU time spent doing things like coalescing/defraging/zeroing pages.
-    s64 kernel_computation;
+    //// CPU time spent doing things like coalescing/defraging/zeroing pages.
+    //s64 kernel_computation;
+
+    // Total estimated cost in cycles.
+    u64 cost;
+
+    // Total estimated benefit in cycles.
+    u64 benefit;
 };
 
 bool mm_decide(const struct mm_cost_delta *cost);

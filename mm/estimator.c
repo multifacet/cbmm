@@ -80,6 +80,48 @@ static int __init mm_econ_init(void)
 }
 subsys_initcall(mm_econ_init);
 
+///////////////////////////////////////////////////////////////////////////////
+// Actual implementation
+
+static bool
+have_free_huge_pages(void)
+{
+    struct zone *zone;
+    int order;
+
+    for_each_populated_zone(zone) {
+	for (order = HUGE_PAGE_ORDER; order < MAX_ORDER; ++order) {
+            if (zone->free_area[order].nr_free > 0) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+// Estimate cost/benefit of a huge page promotion for the current process.
+void
+mm_estimate_huge_page_promote_cost_benefit(struct mm_cost_delta *cost)
+{
+    // Estimated cost.
+    //
+    // For now, we hard-code a bunch of stuff, and we make a lot of
+    // assumptions. We can relax these assumptions later if we need to.
+
+    // TODO: Assume allocation is free if we have free huge pages.
+    // TODO: Assume we don't care what node it is on...
+    const u64 alloc_cost = have_free_huge_pages() ? 0 : (1ul << 32);
+
+    // TODO: Assume constant prep costs (zeroing or copying).
+    const u64 prep_cost = 60 * 2000; // ~60us
+
+    // Compute total cost.
+    cost->cost = alloc_cost + prep_cost;
+
+    // TODO: Estimate benefit.
+    cost->benefit = 0;
+}
 
 // Estimates the change in the given metrics under the given action. Updates
 // the given cost struct in place.
@@ -91,30 +133,24 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
 {
     switch (action->action) {
         case MM_ACTION_NONE:
-            cost->kernel_computation = 0;
-            cost->page_fault_freq = 0;
-            cost->tlb_misses = 0;
+            cost->cost = 0;
+            cost->benefit = 0;
             return;
 
         case MM_ACTION_PROMOTE_HUGE:
-            // TODO(markm)
-            cost->kernel_computation = 0;
-            cost->page_fault_freq = 0;
-            cost->tlb_misses = 0;
+            mm_estimate_huge_page_promote_cost_benefit(cost);
             return;
 
         case MM_ACTION_DEMOTE_HUGE:
             // TODO(markm)
-            cost->kernel_computation = 0;
-            cost->page_fault_freq = 0;
-            cost->tlb_misses = 0;
+            cost->cost = 0;
+            cost->benefit = 0;
             return;
 
         case MM_ACTION_RUN_DEFRAG:
             // TODO(markm)
-            cost->kernel_computation = 0;
-            cost->page_fault_freq = 0;
-            cost->tlb_misses = 0;
+            cost->cost = 0;
+            cost->benefit = 0;
             return;
 
         default:
