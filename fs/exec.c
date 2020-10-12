@@ -1376,6 +1376,10 @@ void setup_new_exec(struct linux_binprm * bprm)
 
 	if (strncmp(current->comm, huge_addr_comm, MAX_HUGE_ADDR_COMM) == 0) {
 		huge_addr_pid = current->pid;
+		pr_warn("Setting new huge_addr_pid=%d\n", huge_addr_pid);
+	} else {
+		pr_warn("Command (%s) does not match huge_addr_comm=%s\n",
+				current->comm, huge_addr_comm);
 	}
 
 	/* Set the new mm task size. We have to do that late because it may
