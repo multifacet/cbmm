@@ -92,7 +92,7 @@ extern bool is_vma_temporary_stack(struct vm_area_struct *vma);
 extern unsigned long transparent_hugepage_flags;
 extern pid_t huge_addr_pid;
 extern u64 huge_addr;
-#define MAX_HUGE_ADDR_COMM 16
+#define MAX_HUGE_ADDR_COMM 48
 extern char huge_addr_comm[MAX_HUGE_ADDR_COMM];
 
 bool huge_addr_enabled(struct vm_area_struct *vma, unsigned long address);
