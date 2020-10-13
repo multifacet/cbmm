@@ -1037,7 +1037,7 @@ static int collapse_huge_page(struct mm_struct *mm,
 	if (mm_find_pmd(mm, address) != pmd)
 		goto out;
 
-	pr_info("promoting 2: vma=%p", vma);
+	pr_info("promoting 2: vma=%p vaddr=%llx", vma, address);
 	anon_vma_lock_write(vma->anon_vma);
 
 	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, NULL, mm,
