@@ -1263,6 +1263,13 @@ void promote_to_huge(struct mm_struct *mm,
 
 	pr_info("Attempting to promote %lx (vma=%p mm=%p)", address, vma, mm);
 
+	// Linux doesn't support huge pages for file-backed memory, which
+	// unfortunately rules out huge-page mappings for the text section.
+	if (vma->vm_file) {
+		pr_warn("Not promoting %lx: file-backed memory.", address);
+		return;
+	}
+
 	spin_lock(&khugepaged_mm_lock);
 	down_read(&mm->mmap_sem);
 
