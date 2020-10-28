@@ -4151,6 +4151,7 @@ retry_pud:
 		// (markm) No entry present.
 
 		// (markm) run the estimator to check if we should create a 1GB page.
+		mm_action.address = address;
 		mm_action.action = MM_ACTION_PROMOTE_HUGE;
 		mm_action.huge_page_order = HPAGE_PUD_SHIFT-PAGE_SHIFT;
 		mm_estimate_changes(&mm_action, &mm_cost_delta);
@@ -4194,6 +4195,7 @@ retry_pud:
 		// (markm) No entry present.
 
 		// (markm) run the estimator to check if we should create a 2MB page.
+		mm_action.address = address;
 		mm_action.action = MM_ACTION_PROMOTE_HUGE;
 		mm_action.huge_page_order = HPAGE_PMD_ORDER;
 		mm_estimate_changes(&mm_action, &mm_cost_delta);

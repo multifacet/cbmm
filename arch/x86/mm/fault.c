@@ -20,6 +20,7 @@
 #include <linux/mm_types.h>
 #include <linux/mm_stats.h>
 #include <linux/huge_mm.h>
+#include <linux/mm_econ.h>
 
 #include <asm/cpufeature.h>		/* boot_cpu_has, ...		*/
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
@@ -1294,6 +1295,7 @@ bool do_user_addr_fault(struct pt_regs *regs,
 	vm_fault_t fault, major = 0;
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 	bool is_huge = false;
+	int ret;
 
 	tsk = current;
 	mm = tsk->mm;
@@ -1449,6 +1451,10 @@ good_area:
 
 	is_huge = !(fault & (VM_FAULT_OOM | VM_FAULT_BASE_PAGE));
 
+	if (is_huge) {
+		mm_register_promotion(address & HPAGE_PMD_MASK);
+	}
+
 	/*
 	 * If we need to retry the mmap_sem has already been released,
 	 * and if there is a fatal signal pending there is no guarantee
@@ -1480,7 +1486,10 @@ good_area:
 
 	// markm: check if we should promote the recently created page.
 	if (!is_huge && huge_addr_enabled(vma, address)) {
-		promote_to_huge(mm, vma, address & HPAGE_PMD_MASK);
+		ret = promote_to_huge(mm, vma, address & HPAGE_PMD_MASK);
+		if (ret == SCAN_SUCCEED) {
+			mm_register_promotion(address & HPAGE_PMD_MASK);
+		}
 	}
 
 	/*

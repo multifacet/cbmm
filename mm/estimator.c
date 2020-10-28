@@ -7,6 +7,7 @@
 #include <linux/mm.h>
 #include <linux/kobject.h>
 #include <linux/init.h>
+#include <linux/hashtable.h>
 
 #define HUGE_PAGE_ORDER 9
 
@@ -58,30 +59,21 @@ static const struct attribute_group mm_econ_attr_group = {
     .attrs = mm_econ_attr,
 };
 
-static int __init mm_econ_init(void)
-{
-    struct kobject *mm_econ_kobj;
-    int err;
-
-    mm_econ_kobj = kobject_create_and_add("mm_econ", mm_kobj);
-    if (unlikely(!mm_econ_kobj)) {
-        pr_err("failed to create mm_econ kobject\n");
-        return -ENOMEM;
-    }
-
-    err = sysfs_create_group(mm_econ_kobj, &mm_econ_attr_group);
-    if (err) {
-        pr_err("failed to register mm_econ group\n");
-        kobject_put(mm_econ_kobj);
-        return err;
-    }
-
-    return 0;
-}
-subsys_initcall(mm_econ_init);
-
 ///////////////////////////////////////////////////////////////////////////////
 // Actual implementation
+
+struct h_node {
+    u64 addr;
+    u64 benefit;
+    struct hlist_node node;
+};
+
+// Create a hash map for the profile.
+#define PROFILE_BITS 13
+DEFINE_HASHTABLE(mm_econ_profile, PROFILE_BITS);
+
+// We need to know how many bits are masked off the end of the address.
+static u64 mm_econ_profile_region_bits = 0;
 
 static bool
 have_free_huge_pages(void)
@@ -100,9 +92,33 @@ have_free_huge_pages(void)
     return false;
 }
 
+static u64
+compute_hpage_benefit(const struct mm_action *action)
+{
+    struct h_node *cur;
+    u64 masked_addr = action->address
+        & ~GENMASK_ULL(mm_econ_profile_region_bits, 0);
+
+    hash_for_each_possible(mm_econ_profile, cur, node, masked_addr) {
+        pr_warn("Found hpage in profile: "
+                "address=%llx region=%llx benefit=%lld\n",
+                action->address, masked_addr, cur->benefit);
+        return cur->benefit;
+    }
+
+    return 0;
+}
+
+static void
+init_hard_wired_profile(void)
+{
+    mm_econ_profile_region_bits = 0; // TODO
+}
+
 // Estimate cost/benefit of a huge page promotion for the current process.
 void
-mm_estimate_huge_page_promote_cost_benefit(struct mm_cost_delta *cost)
+mm_estimate_huge_page_promote_cost_benefit(
+       const struct mm_action *action, struct mm_cost_delta *cost)
 {
     // Estimated cost.
     //
@@ -119,8 +135,8 @@ mm_estimate_huge_page_promote_cost_benefit(struct mm_cost_delta *cost)
     // Compute total cost.
     cost->cost = alloc_cost + prep_cost;
 
-    // TODO: Estimate benefit.
-    cost->benefit = 0;
+    // Estimate benefit.
+    cost->benefit = compute_hpage_benefit(action);
 }
 
 // Estimates the change in the given metrics under the given action. Updates
@@ -138,7 +154,7 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
             return;
 
         case MM_ACTION_PROMOTE_HUGE:
-            mm_estimate_huge_page_promote_cost_benefit(cost);
+            mm_estimate_huge_page_promote_cost_benefit(action, cost);
             return;
 
         case MM_ACTION_DEMOTE_HUGE:
@@ -166,10 +182,43 @@ bool mm_decide(const struct mm_cost_delta *cost)
     if (mm_econ_mode == 0) {
         return true;
     } else if (mm_econ_mode == 1) {
-        // TODO(markm): for now default to the normal linux behavior
-        return true;
+        return cost->benefit > cost->cost;
     } else {
         BUG();
         return false;
     }
 }
+
+// Inform the estimator of the promotion of the given huge page.
+void mm_register_promotion(u64 addr)
+{
+    // TODO: not sure if we need this, but the hooks are in place elsewhere...
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Init
+
+static int __init mm_econ_init(void)
+{
+    struct kobject *mm_econ_kobj;
+    int err;
+
+    mm_econ_kobj = kobject_create_and_add("mm_econ", mm_kobj);
+    if (unlikely(!mm_econ_kobj)) {
+        pr_err("failed to create mm_econ kobject\n");
+        return -ENOMEM;
+    }
+
+    err = sysfs_create_group(mm_econ_kobj, &mm_econ_attr_group);
+    if (err) {
+        pr_err("failed to register mm_econ group\n");
+        kobject_put(mm_econ_kobj);
+        return err;
+    }
+
+    hash_init(mm_econ_profile);
+    init_hard_wired_profile();
+
+    return 0;
+}
+subsys_initcall(mm_econ_init);

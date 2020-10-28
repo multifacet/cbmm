@@ -12,6 +12,8 @@
 struct mm_action {
     int action;
 
+    u64 address;
+
     // Extra parameters of the action.
     union {
         // No extra parameters are needed.
@@ -47,5 +49,7 @@ bool mm_decide(const struct mm_cost_delta *cost);
 
 void
 mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost);
+
+void mm_register_promotion(u64 addr);
 
 #endif

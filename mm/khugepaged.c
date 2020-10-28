@@ -20,38 +20,11 @@
 #include <linux/shmem_fs.h>
 #include <linux/mm_econ.h>
 #include <linux/mm_stats.h>
+#include <linux/huge_mm.h>
 
 #include <asm/tlb.h>
 #include <asm/pgalloc.h>
 #include "internal.h"
-
-enum scan_result {
-	SCAN_FAIL,
-	SCAN_SUCCEED,
-	SCAN_PMD_NULL,
-	SCAN_EXCEED_NONE_PTE,
-	SCAN_PTE_NON_PRESENT,
-	SCAN_PAGE_RO,
-	SCAN_LACK_REFERENCED_PAGE,
-	SCAN_PAGE_NULL,
-	SCAN_SCAN_ABORT,
-	SCAN_PAGE_COUNT,
-	SCAN_PAGE_LRU,
-	SCAN_PAGE_LOCK,
-	SCAN_PAGE_ANON,
-	SCAN_PAGE_COMPOUND,
-	SCAN_ANY_PROCESS,
-	SCAN_VMA_NULL,
-	SCAN_VMA_CHECK,
-	SCAN_ADDRESS_RANGE,
-	SCAN_SWAP_CACHE_PAGE,
-	SCAN_DEL_PAGE_LRU,
-	SCAN_ALLOC_HUGE_PAGE_FAIL,
-	SCAN_CGROUP_CHARGE_FAIL,
-	SCAN_EXCEED_SWAP_PTE,
-	SCAN_TRUNCATED,
-	SCAN_PAGE_HAS_PRIVATE,
-};
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/huge_memory.h>
@@ -1253,7 +1226,8 @@ out:
 	return ret;
 }
 
-void promote_to_huge(struct mm_struct *mm,
+int
+promote_to_huge(struct mm_struct *mm,
 		struct vm_area_struct *vma,
 		unsigned long address)
 {
