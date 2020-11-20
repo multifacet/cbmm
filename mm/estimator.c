@@ -68,9 +68,12 @@ struct h_node {
     struct hlist_node node;
 };
 
-// Create a hash map for the profile.
+// A hash map for the profile.
 #define PROFILE_BITS 13
 DEFINE_HASHTABLE(mm_econ_profile, PROFILE_BITS);
+
+// The exepected duration of the workload (cycles).
+static u64 mm_econ_expected_duration = 0;
 
 // We need to know how many bits are masked off the end of the address.
 static u64 mm_econ_profile_region_bits = 0;
@@ -113,6 +116,7 @@ static void
 init_hard_wired_profile(void)
 {
     mm_econ_profile_region_bits = 0; // TODO
+    mm_econ_expected_duration = 0; // TODO
 }
 
 // Estimate cost/benefit of a huge page promotion for the current process.
@@ -127,6 +131,7 @@ mm_estimate_huge_page_promote_cost_benefit(
 
     // TODO: Assume allocation is free if we have free huge pages.
     // TODO: Assume we don't care what node it is on...
+    // TODO: Maybe account for opportunity cost as rate/ratio?
     const u64 alloc_cost = have_free_huge_pages() ? 0 : (1ul << 32);
 
     // TODO: Assume constant prep costs (zeroing or copying).
