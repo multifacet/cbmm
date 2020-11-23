@@ -21,6 +21,7 @@
 #include <linux/mm_econ.h>
 #include <linux/mm_stats.h>
 #include <linux/huge_mm.h>
+#include <linux/badger_trap.h>
 
 #include <asm/tlb.h>
 #include <asm/pgalloc.h>
@@ -1079,6 +1080,15 @@ static int collapse_huge_page(struct mm_struct *mm,
 	count_memcg_events(memcg, THP_COLLAPSE_ALLOC, 1);
 	lru_cache_add_active_or_unevictable(new_page, vma);
 	pgtable_trans_huge_deposit(mm, pmd, pgtable);
+	/* Make the page table entry as reserved for TLB miss tracking */
+	if(mm && mm->badger_trap_enabled) {
+		if (vma && !(vma->vm_flags & (VM_EXEC | VM_MAYEXEC))) {
+			// TODO markm currently handle anon pages only
+			if (vma_is_anonymous(vma)) {
+				_pmd = pmd_mkreserve(_pmd);
+			}
+		}
+	}
 	set_pmd_at(mm, address, pmd, _pmd);
 	update_mmu_cache_pmd(vma, address, pmd);
 	spin_unlock(pmd_ptl);

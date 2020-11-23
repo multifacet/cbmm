@@ -1199,7 +1199,8 @@ access_error(unsigned long error_code, struct vm_area_struct *vma)
 
 	/* read, present: */
 	if (unlikely(error_code & X86_PF_PROT))
-		return 1;
+		return !((error_code & X86_PF_RSVD) &&
+				current->mm->badger_trap_enabled);
 
 	/* read, not present: */
 	if (unlikely(!(vma->vm_flags & (VM_READ | VM_EXEC | VM_WRITE))))
@@ -1308,7 +1309,8 @@ bool do_user_addr_fault(struct pt_regs *regs,
 	 * Reserved bits are never expected to be set on
 	 * entries in the user portion of the page tables.
 	 */
-	if (unlikely(hw_error_code & X86_PF_RSVD))
+	if (unlikely(hw_error_code & X86_PF_RSVD) &&
+			!current->mm->badger_trap_enabled)
 		pgtable_bad(regs, hw_error_code, address);
 
 	/*

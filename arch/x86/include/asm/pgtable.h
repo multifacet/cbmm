@@ -212,6 +212,7 @@ static inline unsigned long pte_pfn(pte_t pte)
 {
 	phys_addr_t pfn = pte_val(pte);
 	pfn ^= protnone_mask(pfn);
+	pfn &= ~_PAGE_RESERVED; // markm: badger trap
 	return (pfn & PTE_PFN_MASK) >> PAGE_SHIFT;
 }
 
@@ -219,6 +220,7 @@ static inline unsigned long pmd_pfn(pmd_t pmd)
 {
 	phys_addr_t pfn = pmd_val(pmd);
 	pfn ^= protnone_mask(pfn);
+	pfn &= ~_PAGE_RESERVED; // markm: badger trap
 	return (pfn & pmd_pfn_mask(pmd)) >> PAGE_SHIFT;
 }
 
@@ -226,6 +228,7 @@ static inline unsigned long pud_pfn(pud_t pud)
 {
 	phys_addr_t pfn = pud_val(pud);
 	pfn ^= protnone_mask(pfn);
+	pfn &= ~_PAGE_RESERVED; // markm: badger trap
 	return (pfn & pud_pfn_mask(pud)) >> PAGE_SHIFT;
 }
 

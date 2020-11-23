@@ -712,9 +712,59 @@ void __noreturn do_exit(long code)
 {
 	struct task_struct *tsk = current;
 	int group_dead;
+	static DEFINE_MUTEX(result_mutex);
 
 	profile_task_exit(tsk);
 	kcov_task_exit(tsk);
+
+	/*
+	 * Statistics for Badger Trap
+	 */
+	if(current->mm && current->mm->badger_trap_enabled)
+	{
+		mutex_lock(&result_mutex);
+		current->mm->total_dtlb_4kb_load_misses +=
+			current->total_dtlb_4kb_load_misses;
+		current->mm->total_dtlb_2mb_load_misses +=
+			current->total_dtlb_2mb_load_misses;
+		current->mm->total_dtlb_4kb_store_misses +=
+			current->total_dtlb_4kb_store_misses;
+		current->mm->total_dtlb_2mb_store_misses +=
+			current->total_dtlb_2mb_store_misses;
+		mutex_unlock(&result_mutex);
+	}
+
+	if(current->mm && current->mm->badger_trap_enabled
+			&& current->tgid == current->pid)
+	{
+		if(current->real_parent->mm->badger_trap_enabled)
+		{
+			mutex_lock(&result_mutex);
+			current->real_parent->mm->total_dtlb_4kb_load_misses +=
+				current->mm->total_dtlb_4kb_load_misses;
+			current->real_parent->mm->total_dtlb_2mb_load_misses +=
+				current->mm->total_dtlb_2mb_load_misses;
+			current->real_parent->mm->total_dtlb_4kb_store_misses +=
+				current->mm->total_dtlb_4kb_store_misses;
+			current->real_parent->mm->total_dtlb_2mb_store_misses +=
+				current->mm->total_dtlb_2mb_store_misses;
+			mutex_unlock(&result_mutex);
+		}
+		else
+		{
+			pr_warn("===================================\n");
+			pr_warn("BadgerTrap: Statistics for Process %s\n", current->comm);
+			pr_warn("BadgerTrap: DTLB load miss for 4KB page detected %llu\n",
+					current->mm->total_dtlb_4kb_load_misses);
+			pr_warn("BadgerTrap: DTLB load miss for 2MB page detected %llu\n",
+					current->mm->total_dtlb_2mb_load_misses);
+			pr_warn("BadgerTrap: DTLB store miss for 4KB page detected %llu\n",
+					current->mm->total_dtlb_4kb_store_misses);
+			pr_warn("BadgerTrap: DTLB store miss for 2MB page detected %llu\n",
+					current->mm->total_dtlb_2mb_store_misses);
+			pr_warn("===================================\n");
+		}
+	}
 
 	WARN_ON(blk_needs_flush_plug(tsk));
 

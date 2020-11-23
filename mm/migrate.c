@@ -48,6 +48,7 @@
 #include <linux/page_owner.h>
 #include <linux/sched/mm.h>
 #include <linux/ptrace.h>
+#include <linux/badger_trap.h>
 
 #include <asm/tlbflush.h>
 
@@ -2029,6 +2030,7 @@ int migrate_misplaced_transhuge_page(struct mm_struct *mm,
 	struct page *new_page = NULL;
 	int page_lru = page_is_file_cache(page);
 	unsigned long start = address & HPAGE_PMD_MASK;
+	bool is_old_reserved = is_pmd_reserved(*pmd);
 
 	new_page = alloc_pages_node(node,
 		(GFP_TRANSHUGE_LIGHT | __GFP_THISNODE),
@@ -2091,6 +2093,14 @@ int migrate_misplaced_transhuge_page(struct mm_struct *mm,
 	 * visible before the pagetable update.
 	 */
 	page_add_anon_rmap(new_page, vma, start, true);
+
+	/*
+	 * Make the page table entry as reserved for TLB miss tracking
+	 * if the PMD was marked as reserved.
+	 */
+	//if(is_old_reserved && mm && mm->badger_trap_enabled) // TODO markm uncomment
+	//	entry = pmd_mkreserve(entry);
+
 	/*
 	 * At this point the pmd is numa/protnone (i.e. non present) and the TLB
 	 * has already been flushed globally.  So no TLB can be currently

@@ -524,6 +524,13 @@ struct mm_struct {
 		atomic_long_t hugetlb_usage;
 #endif
 		struct work_struct async_put_work;
+
+		/* BadgerTrap */
+		bool badger_trap_enabled;
+		u64 total_dtlb_4kb_store_misses;
+		u64 total_dtlb_2mb_store_misses;
+		u64 total_dtlb_4kb_load_misses;
+		u64 total_dtlb_2mb_load_misses;
 	} __randomize_layout;
 
 	/*
