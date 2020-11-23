@@ -1010,7 +1010,7 @@ static int collapse_huge_page(struct mm_struct *mm,
 	if (mm_find_pmd(mm, address) != pmd)
 		goto out;
 
-	pr_info("promoting 2: vma=%p vaddr=%llx", vma, address);
+	pr_info("promoting 2: vma=%p vaddr=%lx", vma, address);
 	anon_vma_lock_write(vma->anon_vma);
 
 	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, NULL, mm,
@@ -1241,7 +1241,7 @@ promote_to_huge(struct mm_struct *mm,
 	// unfortunately rules out huge-page mappings for the text section.
 	if (vma->vm_file) {
 		pr_warn("Not promoting %lx: file-backed memory.", address);
-		return;
+		return SCAN_FAIL;
 	}
 
 	spin_lock(&khugepaged_mm_lock);
@@ -1260,6 +1260,8 @@ promote_to_huge(struct mm_struct *mm,
 
 	pr_info("Attempted to promote %lx: result=%d hpage=%p",
 			address, result, hpage);
+
+	return result;
 }
 
 static void collect_mm_slot(struct mm_slot *mm_slot)

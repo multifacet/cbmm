@@ -1374,6 +1374,7 @@ void setup_new_exec(struct linux_binprm * bprm)
 	perf_event_exec();
 	__set_task_comm(current, kbasename(bprm->filename), true);
 
+	/* huge_addr checking */
 	if (strncmp(current->comm, huge_addr_comm, MAX_HUGE_ADDR_COMM) == 0) {
 		huge_addr_pid = current->pid;
 		pr_warn("Setting new huge_addr_pid=%d\n", huge_addr_pid);
