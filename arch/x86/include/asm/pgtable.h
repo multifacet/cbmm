@@ -794,7 +794,9 @@ static inline int pmd_none(pmd_t pmd)
 
 static inline unsigned long pmd_page_vaddr(pmd_t pmd)
 {
-	return (unsigned long)__va(pmd_val(pmd) & pmd_pfn_mask(pmd));
+	unsigned long raw_val = pmd_val(pmd) & pmd_pfn_mask(pmd);
+	raw_val &= ~_PAGE_RESERVED; // markm: badger trap
+	return (unsigned long)__va(raw_val);
 }
 
 /*

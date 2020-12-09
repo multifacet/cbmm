@@ -1081,7 +1081,7 @@ static int collapse_huge_page(struct mm_struct *mm,
 	lru_cache_add_active_or_unevictable(new_page, vma);
 	pgtable_trans_huge_deposit(mm, pmd, pgtable);
 	/* Make the page table entry as reserved for TLB miss tracking */
-	if(mm && mm->badger_trap_enabled) {
+	if(is_badger_trap_enabled(mm, address)) {
 		if (vma && !(vma->vm_flags & (VM_EXEC | VM_MAYEXEC))) {
 			// TODO markm currently handle anon pages only
 			if (vma_is_anonymous(vma)) {
@@ -1256,9 +1256,12 @@ promote_to_huge(struct mm_struct *mm,
 
 	spin_lock(&khugepaged_mm_lock);
 	down_read(&mm->mmap_sem);
+	down_read(&mm->badger_trap_page_table_sem);
 
 	node = khugepaged_find_target_node();
 	result = collapse_huge_page(mm, address, &hpage, node, 512, /* force */ true);
+
+	up_read(&mm->badger_trap_page_table_sem);
 
 	if (IS_ERR_OR_NULL(hpage)) {
 		pr_warn("hpage is null or error");

@@ -481,6 +481,8 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 	if (down_write_killable(&current->mm->mmap_sem))
 		return -EINTR;
 
+	//down_read(&current->mm->badger_trap_page_table_sem);
+
 	/*
 	 * If userspace did not allocate the pkey, do not let
 	 * them use it here.
@@ -568,6 +570,7 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 		prot = reqprot;
 	}
 out:
+	//up_read(&current->mm->badger_trap_page_table_sem);
 	up_write(&current->mm->mmap_sem);
 	return error;
 }

@@ -61,6 +61,23 @@ struct mm_rss_stat {
 	atomic_long_t count[NR_MM_COUNTERS];
 };
 
+struct badger_trap_stats {
+	u64 total_dtlb_4kb_store_misses;
+	u64 total_dtlb_2mb_store_misses;
+	u64 total_dtlb_4kb_load_misses;
+	u64 total_dtlb_2mb_load_misses;
+};
+
+static inline void badger_trap_add_stats(
+		struct badger_trap_stats *to,
+		const struct badger_trap_stats *from)
+{
+	to->total_dtlb_4kb_store_misses += from->total_dtlb_4kb_store_misses;
+	to->total_dtlb_2mb_store_misses += from->total_dtlb_2mb_store_misses;
+	to->total_dtlb_4kb_load_misses += from->total_dtlb_4kb_load_misses;
+	to->total_dtlb_2mb_load_misses += from->total_dtlb_2mb_load_misses;
+}
+
 struct page_frag {
 	struct page *page;
 #if (BITS_PER_LONG > 32) || (PAGE_SIZE >= 65536)

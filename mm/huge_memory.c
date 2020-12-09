@@ -1112,8 +1112,8 @@ static vm_fault_t __do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 		lru_cache_add_active_or_unevictable(page, vma);
 		pgtable_trans_huge_deposit(vma->vm_mm, vmf->pmd, pgtable);
 		/* Make the page table entry as reserved for TLB miss tracking */
-		if(vma->vm_mm && vma->vm_mm->badger_trap_enabled
-				&& !(vmf->flags & FAULT_FLAG_INSTRUCTION))
+		if(is_badger_trap_enabled(vma->vm_mm, haddr)
+			&& !(vmf->flags & FAULT_FLAG_INSTRUCTION))
 		{
 			entry = pmd_mkreserve(entry);
 		}
@@ -1188,7 +1188,7 @@ static bool set_huge_zero_page(pgtable_t pgtable, struct mm_struct *mm,
 	 * No need to worry for zero page with instruction faults.
 	 * Instruction faults will never reach here.
 	 */
-	if(mm && mm->badger_trap_enabled) {
+	if(is_badger_trap_enabled(mm, haddr)) {
 		entry = pmd_mkreserve(entry);
 	}
 	set_pmd_at(mm, haddr, pmd, entry);
@@ -1539,7 +1539,7 @@ int copy_huge_pmd(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		 * reference.
 		 */
 		zero_page = mm_get_huge_zero_page(dst_mm);
-		set_huge_zero_page(pgtable, dst_mm, vma, addr, dst_pmd,
+		set_huge_zero_page(pgtable, dst_mm, vma, addr, dst_pmd, // TODO markm do we need something here?
 				zero_page);
 		ret = 0;
 		goto out_unlock;
@@ -1555,7 +1555,7 @@ int copy_huge_pmd(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 
 	pmdp_set_wrprotect(src_mm, addr, src_pmd);
 	pmd = pmd_mkold(pmd_wrprotect(pmd));
-	set_pmd_at(dst_mm, addr, dst_pmd, pmd);
+	set_pmd_at(dst_mm, addr, dst_pmd, pmd); // TODO markm do we need something here
 
 	ret = 0;
 out_unlock:
@@ -1644,7 +1644,7 @@ int copy_huge_pud(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 
 	pudp_set_wrprotect(src_mm, addr, src_pud);
 	pud = pud_mkold(pud_wrprotect(pud));
-	set_pud_at(dst_mm, addr, dst_pud, pud);
+	set_pud_at(dst_mm, addr, dst_pud, pud); // TODO markm maybe need something here?
 
 	ret = 0;
 out_unlock:
@@ -1779,7 +1779,7 @@ static vm_fault_t do_huge_pmd_wp_page_fallback(struct vm_fault *vmf,
 		vmf->pte = pte_offset_map(&_pmd, haddr);
 		VM_BUG_ON(!pte_none(*vmf->pte));
 		/* Make the page table entry as reserved for TLB miss tracking */
-		if(vma->vm_mm && vma->vm_mm->badger_trap_enabled
+		if(is_badger_trap_enabled(vma->vm_mm, haddr)
 				&& !(vmf->flags & FAULT_FLAG_INSTRUCTION))
 		{
 			// TODO markm: handle the general case... right now, we
@@ -1939,7 +1939,7 @@ alloc:
 		pmdp_huge_clear_flush_notify(vma, haddr, vmf->pmd);
 		page_add_new_anon_rmap(new_page, vma, haddr, true);
 		/* Make the page table entry as reserved for TLB miss tracking */
-		if(vma->vm_mm && vma->vm_mm->badger_trap_enabled
+		if(is_badger_trap_enabled(vma->vm_mm, haddr)
 				&& !(vmf->flags & FAULT_FLAG_INSTRUCTION))
 		{
 			// Can only get anon mappings here...
@@ -2664,7 +2664,7 @@ static void __split_huge_zero_page_pmd(struct vm_area_struct *vma,
 		 * No need to worry for zero page with instruction faults.
 		 * Instruction faults will never reach here.
 		 */
-		if(mm && mm->badger_trap_enabled) {
+		if(is_badger_trap_enabled(mm, haddr)) {
 			entry = pte_mkreserve(entry);
 		}
 		set_pte_at(mm, haddr, pte, entry);
@@ -3618,7 +3618,7 @@ void remove_migration_pmd(struct page_vma_mapped_walk *pvmw, struct page *new)
 		page_add_anon_rmap(new, vma, mmun_start, true);
 	else
 		page_add_file_rmap(new, true);
-	set_pmd_at(mm, mmun_start, pvmw->pmd, pmde);
+	set_pmd_at(mm, mmun_start, pvmw->pmd, pmde); // TODO markm do we need somethign ehre?
 	if ((vma->vm_flags & VM_LOCKED) && !PageDoubleMap(new))
 		mlock_vma_page(new);
 	update_mmu_cache_pmd(vma, address, pvmw->pmd);

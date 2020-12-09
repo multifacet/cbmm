@@ -1380,14 +1380,13 @@ void setup_new_exec(struct linux_binprm * bprm)
 		huge_addr_pid = current->pid;
 		pr_warn("Setting new huge_addr_pid=%d\n", huge_addr_pid);
 	} else {
-		pr_warn("Command (%s) does not match huge_addr_comm=%s\n",
+		pr_info("NOT huge_addr process (%s) huge_addr_comm=%s.\n",
 				current->comm, huge_addr_comm);
 	}
 
 	/* Check if we need to enable badger trap for this process*/
 	if(is_badger_trap_process(current->comm)) {
-		current->mm->badger_trap_enabled = true;
-		badger_trap_init_all(current->mm);
+		badger_trap_walk(current->mm, 0, ~0ull, true);
 	}
 
 	if(current
@@ -1396,8 +1395,7 @@ void setup_new_exec(struct linux_binprm * bprm)
 		&& current->real_parent->mm
 		&& current->real_parent->mm->badger_trap_enabled)
 	{
-		current->mm->badger_trap_enabled = true;
-		badger_trap_init_all(current->mm);
+		badger_trap_walk(current->mm, 0, ~0ull, true);
 	}
 
 	/* Set the new mm task size. We have to do that late because it may

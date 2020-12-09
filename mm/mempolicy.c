@@ -1083,6 +1083,7 @@ int do_migrate_pages(struct mm_struct *mm, const nodemask_t *from,
 		return err;
 
 	down_read(&mm->mmap_sem);
+	down_read(&mm->badger_trap_page_table_sem);
 
 	/*
 	 * Find a 'source' bit set in 'tmp' whose corresponding 'dest'
@@ -1163,6 +1164,7 @@ int do_migrate_pages(struct mm_struct *mm, const nodemask_t *from,
 		if (err < 0)
 			break;
 	}
+	up_read(&mm->badger_trap_page_table_sem);
 	up_read(&mm->mmap_sem);
 	if (err < 0)
 		return err;

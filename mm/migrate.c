@@ -255,7 +255,7 @@ static bool remove_migration_pte(struct page *page, struct vm_area_struct *vma,
 		if (PageHuge(new)) {
 			pte = pte_mkhuge(pte);
 			pte = arch_make_huge_pte(pte, vma, new, 0);
-			set_huge_pte_at(vma->vm_mm, pvmw.address, pvmw.pte, pte);
+			set_huge_pte_at(vma->vm_mm, pvmw.address, pvmw.pte, pte); // TODO markm is anything needed here?
 			if (PageAnon(new))
 				hugepage_add_anon_rmap(new, vma, pvmw.address);
 			else
@@ -263,7 +263,7 @@ static bool remove_migration_pte(struct page *page, struct vm_area_struct *vma,
 		} else
 #endif
 		{
-			set_pte_at(vma->vm_mm, pvmw.address, pvmw.pte, pte);
+			set_pte_at(vma->vm_mm, pvmw.address, pvmw.pte, pte); // TODO markm is anything needed here?
 
 			if (PageAnon(new))
 				page_add_anon_rmap(new, vma, pvmw.address, false);
@@ -2030,7 +2030,7 @@ int migrate_misplaced_transhuge_page(struct mm_struct *mm,
 	struct page *new_page = NULL;
 	int page_lru = page_is_file_cache(page);
 	unsigned long start = address & HPAGE_PMD_MASK;
-	bool is_old_reserved = is_pmd_reserved(*pmd);
+	//bool is_old_reserved = is_pmd_reserved(*pmd);
 
 	new_page = alloc_pages_node(node,
 		(GFP_TRANSHUGE_LIGHT | __GFP_THISNODE),
@@ -2144,7 +2144,7 @@ out_fail:
 	ptl = pmd_lock(mm, pmd);
 	if (pmd_same(*pmd, entry)) {
 		entry = pmd_modify(entry, vma->vm_page_prot);
-		set_pmd_at(mm, start, pmd, entry);
+		set_pmd_at(mm, start, pmd, entry); // TODO markm i don't think anything is needed here
 		update_mmu_cache_pmd(vma, address, &entry);
 	}
 	spin_unlock(ptl);
@@ -2327,7 +2327,7 @@ again:
 			swp_pte = swp_entry_to_pte(entry);
 			if (pte_soft_dirty(pte))
 				swp_pte = pte_swp_mksoft_dirty(swp_pte);
-			set_pte_at(mm, addr, ptep, swp_pte);
+			set_pte_at(mm, addr, ptep, swp_pte); // TODO markm do we need something here?
 
 			/*
 			 * This is like regular unmap: we remove the rmap and
@@ -2821,11 +2821,11 @@ static void migrate_vma_insert_page(struct migrate_vma *migrate,
 	if (flush) {
 		flush_cache_page(vma, addr, pte_pfn(*ptep));
 		ptep_clear_flush_notify(vma, addr, ptep);
-		set_pte_at_notify(mm, addr, ptep, entry);
+		set_pte_at_notify(mm, addr, ptep, entry); // TODO markm do we need something here?
 		update_mmu_cache(vma, addr, ptep);
 	} else {
 		/* No need to invalidate - it was non-present before */
-		set_pte_at(mm, addr, ptep, entry);
+		set_pte_at(mm, addr, ptep, entry); // TODO markm do we need something here?
 		update_mmu_cache(vma, addr, ptep);
 	}
 

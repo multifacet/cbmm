@@ -94,6 +94,7 @@
 #include <linux/thread_info.h>
 #include <linux/stackleak.h>
 #include <linux/kasan.h>
+#include <linux/badger_trap.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -1047,6 +1048,11 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 		goto fail_nocontext;
 
 	mm->user_ns = get_user_ns(user_ns);
+
+	// Clear badger trap stats for new address space...
+	memset(&mm->bt_stats, 0, sizeof(struct badger_trap_stats));
+	init_rwsem(&mm->badger_trap_page_table_sem);
+
 	return mm;
 
 fail_nocontext:

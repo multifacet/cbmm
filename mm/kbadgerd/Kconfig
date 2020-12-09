@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config KBADGERD
+	tristate "Adds the kbadgerd module."
+	default m
+	help
+	  Adds the kbadgerd module.

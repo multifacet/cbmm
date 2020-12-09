@@ -9,7 +9,8 @@
 
 extern char badger_trap_process[CONFIG_NR_CPUS][MAX_NAME_LEN];
 
-int is_badger_trap_process(const char* proc_name);
+bool is_badger_trap_process(const char* proc_name);
+bool is_badger_trap_enabled(const struct mm_struct *mm, u64 address);
 inline pte_t pte_mkreserve(pte_t pte);
 inline pte_t pte_unreserve(pte_t pte);
 inline int is_pte_reserved(pte_t pte);
@@ -19,7 +20,7 @@ inline int is_pmd_reserved(pmd_t pmd);
 inline pud_t pud_mkreserve(pud_t pud);
 inline pud_t pud_unreserve(pud_t pud);
 inline int is_pud_reserved(pud_t pud);
-void badger_trap_init_all(struct mm_struct *mm);
-void badger_trap_init(struct mm_struct *mm, u64 lower, u64 upper);
+void badger_trap_walk(struct mm_struct *mm, u64 lower, u64 upper, bool init);
+void print_badger_trap_stats(const struct mm_struct *mm);
 
 #endif /* _LINUX_BADGER_TRAP_H */

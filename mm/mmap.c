@@ -1363,6 +1363,8 @@ static inline bool file_mmap_ok(struct file *file, struct inode *inode,
 
 /*
  * The caller must hold down_write(&current->mm->mmap_sem).
+ *
+ * This function acquires and releases down_read(&current->mm->badger_trap_page_table_sem).
  */
 unsigned long do_mmap(struct file *file, unsigned long addr,
 			unsigned long len, unsigned long prot,
@@ -1372,11 +1374,16 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 {
 	struct mm_struct *mm = current->mm;
 	int pkey = 0;
+	unsigned long ret = 0;
+
+	//down_read(&mm->badger_trap_page_table_sem);
 
 	*populate = 0;
 
-	if (!len)
-		return -EINVAL;
+	if (!len) {
+		ret = -EINVAL;
+		goto out;
+	}
 
 	/*
 	 * Does the application expect PROT_READ to imply PROT_EXEC?
@@ -1397,29 +1404,39 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 
 	/* Careful about overflows.. */
 	len = PAGE_ALIGN(len);
-	if (!len)
-		return -ENOMEM;
+	if (!len) {
+		ret = -ENOMEM;
+		goto out;
+	}
 
 	/* offset overflow? */
-	if ((pgoff + (len >> PAGE_SHIFT)) < pgoff)
-		return -EOVERFLOW;
+	if ((pgoff + (len >> PAGE_SHIFT)) < pgoff) {
+		ret = -EOVERFLOW;
+		goto out;
+	}
 
 	/* Too many mappings? */
-	if (mm->map_count > sysctl_max_map_count)
-		return -ENOMEM;
+	if (mm->map_count > sysctl_max_map_count) {
+		ret = -ENOMEM;
+		goto out;
+	}
 
 	/* Obtain the address to map to. we verify (or select) it and ensure
 	 * that it represents a valid section of the address space.
 	 */
 	addr = get_unmapped_area(file, addr, len, pgoff, flags);
-	if (IS_ERR_VALUE(addr))
-		return addr;
+	if (IS_ERR_VALUE(addr)) {
+		ret = addr;
+		goto out;
+	}
 
 	if (flags & MAP_FIXED_NOREPLACE) {
 		struct vm_area_struct *vma = find_vma(mm, addr);
 
-		if (vma && vma->vm_start < addr + len)
-			return -EEXIST;
+		if (vma && vma->vm_start < addr + len) {
+			ret = -EEXIST;
+			goto out;
+		}
 	}
 
 	if (prot == PROT_EXEC) {
@@ -1436,18 +1453,24 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 			mm->def_flags | VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC;
 
 	if (flags & MAP_LOCKED)
-		if (!can_do_mlock())
-			return -EPERM;
+		if (!can_do_mlock()) {
+			ret = -EPERM;
+			goto out;
+		}
 
-	if (mlock_future_check(mm, vm_flags, len))
-		return -EAGAIN;
+	if (mlock_future_check(mm, vm_flags, len)) {
+		ret = -EAGAIN;
+		goto out;
+	}
 
 	if (file) {
 		struct inode *inode = file_inode(file);
 		unsigned long flags_mask;
 
-		if (!file_mmap_ok(file, inode, pgoff, len))
-			return -EOVERFLOW;
+		if (!file_mmap_ok(file, inode, pgoff, len)) {
+			ret = -EOVERFLOW;
+			goto out;
+		}
 
 		flags_mask = LEGACY_MAP_MASK | file->f_op->mmap_supported_flags;
 
@@ -1463,27 +1486,37 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 			flags &= LEGACY_MAP_MASK;
 			/* fall through */
 		case MAP_SHARED_VALIDATE:
-			if (flags & ~flags_mask)
-				return -EOPNOTSUPP;
+			if (flags & ~flags_mask) {
+				ret = -EOPNOTSUPP;
+				goto out;
+			}
 			if (prot & PROT_WRITE) {
-				if (!(file->f_mode & FMODE_WRITE))
-					return -EACCES;
-				if (IS_SWAPFILE(file->f_mapping->host))
-					return -ETXTBSY;
+				if (!(file->f_mode & FMODE_WRITE)) {
+					ret = -EACCES;
+					goto out;
+				}
+				if (IS_SWAPFILE(file->f_mapping->host)) {
+					ret = -ETXTBSY;
+					goto out;
+				}
 			}
 
 			/*
 			 * Make sure we don't allow writing to an append-only
 			 * file..
 			 */
-			if (IS_APPEND(inode) && (file->f_mode & FMODE_WRITE))
-				return -EACCES;
+			if (IS_APPEND(inode) && (file->f_mode & FMODE_WRITE)) {
+				ret = -EACCES;
+				goto out;
+			}
 
 			/*
 			 * Make sure there are no mandatory locks on the file.
 			 */
-			if (locks_verify_locked(file))
-				return -EAGAIN;
+			if (locks_verify_locked(file)) {
+				ret = -EAGAIN;
+				goto out;
+			}
 
 			vm_flags |= VM_SHARED | VM_MAYSHARE;
 			if (!(file->f_mode & FMODE_WRITE))
@@ -1491,28 +1524,39 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 
 			/* fall through */
 		case MAP_PRIVATE:
-			if (!(file->f_mode & FMODE_READ))
-				return -EACCES;
+			if (!(file->f_mode & FMODE_READ)) {
+				ret = -EACCES;
+				goto out;
+			}
 			if (path_noexec(&file->f_path)) {
-				if (vm_flags & VM_EXEC)
-					return -EPERM;
+				if (vm_flags & VM_EXEC) {
+					ret = -EPERM;
+					goto out;
+				}
 				vm_flags &= ~VM_MAYEXEC;
 			}
 
-			if (!file->f_op->mmap)
-				return -ENODEV;
-			if (vm_flags & (VM_GROWSDOWN|VM_GROWSUP))
-				return -EINVAL;
+			if (!file->f_op->mmap) {
+				ret = -ENODEV;
+				goto out;
+			}
+			if (vm_flags & (VM_GROWSDOWN|VM_GROWSUP)) {
+				ret = -EINVAL;
+				goto out;
+			}
 			break;
 
 		default:
-			return -EINVAL;
+			ret = -EINVAL;
+			goto out;
 		}
 	} else {
 		switch (flags & MAP_TYPE) {
 		case MAP_SHARED:
-			if (vm_flags & (VM_GROWSDOWN|VM_GROWSUP))
-				return -EINVAL;
+			if (vm_flags & (VM_GROWSDOWN|VM_GROWSUP)) {
+				ret = -EINVAL;
+				goto out;
+			}
 			/*
 			 * Ignore pgoff.
 			 */
@@ -1526,7 +1570,8 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 			pgoff = addr >> PAGE_SHIFT;
 			break;
 		default:
-			return -EINVAL;
+			ret = -EINVAL;
+			goto out;
 		}
 	}
 
@@ -1549,7 +1594,11 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	    ((vm_flags & VM_LOCKED) ||
 	     (flags & (MAP_POPULATE | MAP_NONBLOCK)) == MAP_POPULATE))
 		*populate = len;
-	return addr;
+	ret = addr;
+
+out:
+	//up_read(&mm->badger_trap_page_table_sem);
+	return ret;
 }
 
 unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,

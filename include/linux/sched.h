@@ -1281,10 +1281,7 @@ struct task_struct {
 	unsigned long			prev_lowest_stack;
 #endif
 
-	u64 total_dtlb_4kb_load_misses;
-	u64 total_dtlb_2mb_load_misses;
-	u64 total_dtlb_4kb_store_misses;
-	u64 total_dtlb_2mb_store_misses;
+	struct badger_trap_stats bt_stats;
 
 	/*
 	 * New fields for task_struct should be added above here, so that

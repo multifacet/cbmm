@@ -3713,7 +3713,9 @@ retry_avoidcopy:
 		mmu_notifier_invalidate_range(mm, range.start, range.end);
 		new_entry = make_huge_pte(vma, new_page, 1);
 		/* Make the page table entry as reserved for TLB miss tracking */
-		if(mm && mm->badger_trap_enabled && !(flags & FAULT_FLAG_INSTRUCTION)) {
+		if(is_badger_trap_enabled(mm, haddr)
+				&& !(flags & FAULT_FLAG_INSTRUCTION))
+		{
 			// new_entry = pte_mkreserve(new_entry); // TODO markm uncomment
 		}
 		set_huge_pte_at(mm, haddr, ptep, new_entry);
@@ -3948,7 +3950,7 @@ retry:
 				&& (vma->vm_flags & VM_SHARED)));
 
 	/* Make the page table entry as reserved for TLB miss tracking */
-	if(mm && mm->badger_trap_enabled && !(flags & FAULT_FLAG_INSTRUCTION)) {
+	if(is_badger_trap_enabled(mm, haddr) && !(flags & FAULT_FLAG_INSTRUCTION)) {
 		// new_pte = pte_mkreserve(new_pte);// TODO markm uncomment
 	}
 
@@ -4025,9 +4027,16 @@ static int hugetlb_fake_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	/* Here where we do all our analysis */
 	if (flags & FAULT_FLAG_WRITE)
-	    current->total_dtlb_2mb_store_misses++;
+	    current->bt_stats.total_dtlb_2mb_store_misses++;
 	else
-	    current->total_dtlb_2mb_load_misses++;
+	    current->bt_stats.total_dtlb_2mb_load_misses++;
+
+	if (vma) {
+		if (flags & FAULT_FLAG_WRITE)
+		    vma->bt_stats.total_dtlb_2mb_store_misses++;
+		else
+		    vma->bt_stats.total_dtlb_2mb_load_misses++;
+	}
 
 	*page_table = pte_mkreserve(*page_table);
 	return 0;
@@ -4108,7 +4117,7 @@ vm_fault_t hugetlb_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 			ret = hugetlb_fake_fault(mm, vma, address, ptep, flags);
 			goto out_mutex;
 		}
-		if(pte_present(entry)) {
+		if(pte_present(entry) && is_badger_trap_enabled(mm, address)) {
 			//*ptep = pte_mkreserve(*ptep);  // TODO markm uncomment
 		}
 		mutex_unlock(&hugetlb_fault_mutex_table[hash]);

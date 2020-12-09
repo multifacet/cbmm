@@ -63,6 +63,7 @@
 #include <linux/random.h>
 #include <linux/rcuwait.h>
 #include <linux/compat.h>
+#include <linux/badger_trap.h>
 
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
@@ -722,49 +723,33 @@ void __noreturn do_exit(long code)
 	 */
 	if(current->mm && current->mm->badger_trap_enabled)
 	{
+		// Each thread will print. We just need to take the last one.
 		mutex_lock(&result_mutex);
-		current->mm->total_dtlb_4kb_load_misses +=
-			current->total_dtlb_4kb_load_misses;
-		current->mm->total_dtlb_2mb_load_misses +=
-			current->total_dtlb_2mb_load_misses;
-		current->mm->total_dtlb_4kb_store_misses +=
-			current->total_dtlb_4kb_store_misses;
-		current->mm->total_dtlb_2mb_store_misses +=
-			current->total_dtlb_2mb_store_misses;
+		badger_trap_add_stats(&current->mm->bt_stats, &current->bt_stats);
+		pr_warn("BadgerTrap: Task terminating. current=%p pid=%d tgid=%d mm=%p parent_pid=%d\n",
+				current, current->pid, current->tgid, current->mm,
+				current->real_parent->pid);
+		print_badger_trap_stats(current->mm);
 		mutex_unlock(&result_mutex);
 	}
 
+	/* markm: doesn't seem to work properly if main thread exits not-last.
 	if(current->mm && current->mm->badger_trap_enabled
 			&& current->tgid == current->pid)
 	{
 		if(current->real_parent->mm->badger_trap_enabled)
 		{
 			mutex_lock(&result_mutex);
-			current->real_parent->mm->total_dtlb_4kb_load_misses +=
-				current->mm->total_dtlb_4kb_load_misses;
-			current->real_parent->mm->total_dtlb_2mb_load_misses +=
-				current->mm->total_dtlb_2mb_load_misses;
-			current->real_parent->mm->total_dtlb_4kb_store_misses +=
-				current->mm->total_dtlb_4kb_store_misses;
-			current->real_parent->mm->total_dtlb_2mb_store_misses +=
-				current->mm->total_dtlb_2mb_store_misses;
+			badger_trap_add_stats(&current->real_parent->mm->bt_stats,
+					&current->mm->bt_stats);
 			mutex_unlock(&result_mutex);
 		}
 		else
 		{
-			pr_warn("===================================\n");
-			pr_warn("BadgerTrap: Statistics for Process %s\n", current->comm);
-			pr_warn("BadgerTrap: DTLB load miss for 4KB page detected %llu\n",
-					current->mm->total_dtlb_4kb_load_misses);
-			pr_warn("BadgerTrap: DTLB load miss for 2MB page detected %llu\n",
-					current->mm->total_dtlb_2mb_load_misses);
-			pr_warn("BadgerTrap: DTLB store miss for 4KB page detected %llu\n",
-					current->mm->total_dtlb_4kb_store_misses);
-			pr_warn("BadgerTrap: DTLB store miss for 2MB page detected %llu\n",
-					current->mm->total_dtlb_2mb_store_misses);
-			pr_warn("===================================\n");
+			print_badger_trap_stats(current->mm);
 		}
 	}
+	*/
 
 	WARN_ON(blk_needs_flush_plug(tsk));
 

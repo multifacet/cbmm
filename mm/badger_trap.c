@@ -6,6 +6,7 @@
 #include <linux/hugetlb.h>
 #include <linux/kernel.h>
 #include <linux/pagewalk.h>
+#include <linux/sched/mm.h>
 
 char badger_trap_process[CONFIG_NR_CPUS][MAX_NAME_LEN];
 
@@ -68,15 +69,11 @@ SYSCALL_DEFINE3(init_badger_trap,
 			temp = strncpy(badger_trap_process[i], proc, MAX_NAME_LEN-1);
 		}
 	}
-
-	// All other inputs ignored
-	if(option == 0)
+	else if(option == 0)
 	{
-		current->mm->badger_trap_enabled = true;
-		badger_trap_init_all(current->mm);
+		badger_trap_walk(current->mm, 0, ~0ull, true);
 	}
-
-	if(option < 0)
+	else if(option < 0)
 	{
 		for(i = 0; i < CONFIG_NR_CPUS; i++)
 		{
@@ -86,8 +83,7 @@ SYSCALL_DEFINE3(init_badger_trap,
 				if(ret == 0)
 				{
 					tsk = find_task_by_vpid(pid);
-					tsk->mm->badger_trap_enabled = true;
-					badger_trap_init_all(tsk->mm);
+					badger_trap_walk(tsk->mm, 0, ~0ull, true);
 				}
 			}
 		}
@@ -100,18 +96,39 @@ SYSCALL_DEFINE3(init_badger_trap,
  * This function checks whether a process name provided matches from the list
  * of process names stored to be marked for badger trap.
  */
-int is_badger_trap_process(const char* proc_name)
+bool is_badger_trap_process(const char* proc_name)
 {
 	unsigned int i;
 	for(i = 0; i < CONFIG_NR_CPUS; i++)
 	{
 		if(!strncmp(proc_name, badger_trap_process[i], MAX_NAME_LEN)) {
 			pr_warn("Badger Trap process (%s).", proc_name);
-			return 1;
+			return true;
 		}
 	}
-	pr_warn("NOT Badger Trap process (%s).", proc_name);
-	return 0;
+	pr_info("NOT Badger Trap process (%s).", proc_name);
+	return false;
+}
+
+/*
+ * This function checks whether a process name provided matches from the list
+ * of process names stored to be marked for badger trap.
+ */
+bool is_badger_trap_enabled(const struct mm_struct *mm, u64 address)
+{
+	if (!mm)
+		return false;
+
+	if (!mm->badger_trap_enabled)
+		return false;
+
+	if (address < mm->badger_trap_start)
+		return false;
+
+	if (mm->badger_trap_end < address)
+		return false;
+
+	return true;
 }
 
 /*
@@ -177,8 +194,16 @@ static int bt_init_pud(pud_t *pud, unsigned long addr,
 	if (pud_none(*pud) || !pud_present(*pud))
 		return 0;
 
+	if (!(pud_flags(*pud) & _PAGE_USER))
+		return 0;
+
+	//pr_warn("mm=%p vma=%p addr=%lx pud=%p\n", walk->mm, walk->vma, addr, pud);
 	// We can only get huge puds here.
-	// *pud = pud_mkreserve(*pud);// TODO markm uncomment
+	if (*(bool*)walk->private) {
+		*pud = pud_mkreserve(*pud);
+	} else {
+		*pud = pud_unreserve(*pud);
+	}
 
 	return 0;
 }
@@ -190,8 +215,17 @@ static int bt_init_pmd(pmd_t *pmd, unsigned long addr,
 	if (pmd_none(*pmd) || !pmd_present(*pmd))
 		return 0;
 
-	if (pmd_trans_huge(*pmd))
-		*pmd = pmd_mkreserve(*pmd);
+	if (!(pmd_flags(*pmd) & _PAGE_USER))
+		return 0;
+
+	if (pmd_trans_huge(*pmd)) {
+		if (*(bool*)walk->private) {
+			//pr_warn("mm=%p vma=%p addr=%lx pmd=%p\n", walk->mm, walk->vma, addr, pmd);
+			*pmd = pmd_mkreserve(*pmd);
+		} else {
+			*pmd = pmd_unreserve(*pmd);
+		}
+	}
 
 	return 0;
 }
@@ -201,7 +235,16 @@ static int bt_init_pte(pte_t *pte, unsigned long addr,
 	if (pte_none(*pte) || !pte_present(*pte))
 		return 0;
 
-	*pte = pte_mkreserve(*pte);
+	if (!(pte_flags(*pte) & _PAGE_USER))
+		return 0;
+
+	if (*(bool*)walk->private) {
+		//pr_warn("mm=%p vma=%p addr=%lx ptep=%p pte=%lx\n",
+		//		walk->mm, walk->vma, addr, pte, pte_val(*pte));
+		*pte = pte_mkreserve(*pte);
+	} else {
+		*pte = pte_unreserve(*pte);
+	}
 
 	return 0;
 }
@@ -215,7 +258,16 @@ static int bt_init_hugetlb_entry(pte_t *ptep, unsigned long hmask,
 	if (pte_none(pte) || !pte_present(pte))
 		return 0;
 
-	//pte = pte_mkreserve(pte); // TODO markm: uncomment
+	if (!(pte_flags(pte) & _PAGE_USER))
+		return 0;
+
+	/*
+	if (*(bool*)walk->private) {
+		*pte = pte_mkreserve(*pte);
+	} else {
+		*pte = pte_unreserve(*pte);
+	}
+	*/
 	set_huge_pte_at(walk->mm, addr, ptep, pte);
 
 	return 0;
@@ -224,35 +276,41 @@ static int bt_init_hugetlb_entry(pte_t *ptep, unsigned long hmask,
 static int bt_init_test_walk(unsigned long addr, unsigned long next,
 	struct mm_walk *walk)
 {
+	pr_warn("test_walk(addr=%lx, next=%lx, mm=%p, vma=%p is_exec=%d may_exec=%d is_anon=%d\n",
+			addr, next, walk->mm, walk->vma,
+			walk->vma && (walk->vma->vm_flags & VM_EXEC),
+			walk->vma && (walk->vma->vm_flags & VM_MAYEXEC),
+			walk->vma && vma_is_anonymous(walk->vma));
+
 	// Skip unmapped regions
 	if (!walk->vma)
 		return 1;
 
 	// Skip executable regions, since we don't handle instruction TLB misses.
-	if (walk->vma->vm_flags & (VM_EXEC | VM_MAYEXEC))
-		return 1;
-
-	// TODO: markm: skipping file-backed memory for now...
-	if (!vma_is_anonymous(walk->vma))
+	if (walk->vma->vm_flags & VM_EXEC)
 		return 1;
 
 	return 0;
 }
 
 /*
- * This function walks the page table of the process being marked for badger trap
- * This helps in finding all the PTEs that are to be marked as reserved. This is
- * espicially useful to start badger trap on the fly using (2) and (3). If we do not
- * call this function, when starting badger trap for any process, we may miss some TLB
- * misses from being tracked which may not be desireable.
+ * This function walks the page tables of the given mm_struct for pages mapped
+ * between the given lower and upper addresses (inclusive). Depending on the
+ * value of init, we either set or clear the _PAGE_RESERVED bit in all relevant
+ * page table entries (init == true => set; init == false => clear).
  *
- * [lower, upper] is the virtual address range for which badger trap is turned on.
+ * This function takes care of transparent hugepages and hugepages in general.
  *
- * Note: This function takes care of transparent hugepages and hugepages in general.
+ * NOTE: The upper and lower boundaries are rounded to the up and down,
+ * respectively, to the nearest 2MB boundaries. This makes it easier to deal
+ * with huge pages being formed or broken up.
  *
- * Note: This function acquires and releases mmap_sem.
+ * NOTE: This function acquires and releases mmap_sem.
+ *
+ * NOTE: If `init == false`, there MUST have been a prior call with `init ==
+ * true` first for the same `mm`. Otherwise, there will be a double free.
  */
-void badger_trap_init(struct mm_struct *mm, u64 lower, u64 upper)
+void badger_trap_walk(struct mm_struct *mm, u64 lower, u64 upper, bool init)
 {
 	// markm: see comments in <linux/pagewalk.h>
 	const struct mm_walk_ops ops = {
@@ -263,16 +321,104 @@ void badger_trap_init(struct mm_struct *mm, u64 lower, u64 upper)
 		.test_walk = bt_init_test_walk,
 	};
 	int ret;
+	u64 upper_rounded;
+
+	BUG_ON(!mm);
+	BUG_ON(lower >= upper);
+
+	// Grab when turning on BadgerTrap, and don't release until BadgerTrap
+	// is turned off. Under the assumption that there is at least one call
+	// with `init == true` for each call with `init == false`, the worse
+	// that can happen is a memory leak.
+	if (init) {
+		mmgrab(mm);
+	}
 
 	down_write(&mm->mmap_sem);
 
-	ret = walk_page_range(mm, lower, upper, &ops, NULL);
-	BUG_ON(ret);
+	// When initializing, we want to set these first. If deinitializing, we
+	// set them after walking.
+	if (init) {
+		// Round down to hpage boundary.
+		mm->badger_trap_start = lower & HPAGE_PMD_MASK;
+		// Round up to hpage boundary, but subtract 1 to make it inclusive.
+		mm->badger_trap_end = ((upper - 1) & HPAGE_PMD_MASK) + HPAGE_PMD_SIZE - 1;
+		mm->badger_trap_enabled = init;
+
+		// Clear previous stats.
+		memset(&mm->bt_stats, 0, sizeof(struct badger_trap_stats));
+	}
+
+	// Block any other page faults from changing the mappings while we walk.
+	//
+	// TODO: probably also need to guard migration, thp promotion/demotion,
+	// mmap, mprotect, mlock...
+	down_write(&mm->badger_trap_page_table_sem);
+
+	pr_warn("BadgerTrap: walk(%llx, %llx) init = %d [%llx, %llx]\n",
+			lower, upper, init, mm->badger_trap_start,
+			mm->badger_trap_end);
+
+	// upper is inclusive of the end point, whereas walk_page_range expects
+	// an exclusive endpoint. But we need to be careful of overflow.
+	upper_rounded = upper == ~0ull ?
+				upper & (PAGE_SIZE - 1) :
+				upper + 1;
+
+	ret = walk_page_range(mm, lower, upper_rounded, &ops, &init);
+	if (ret != 0) {
+		pr_err("BadgerTrap: walk_page_range returned %d\n", ret);
+		BUG();
+	}
+
+	up_write(&mm->badger_trap_page_table_sem);
+
+	if (!init) {
+		mm->badger_trap_enabled = init;
+		// Round down to hpage boundary.
+		mm->badger_trap_start = lower & HPAGE_PMD_MASK;
+		// Round up to hpage boundary, but subtract 1 to make it inclusive.
+		mm->badger_trap_end = ((upper - 1) & HPAGE_PMD_MASK) + HPAGE_PMD_SIZE - 1;
+
+		// Clear previous stats.
+		memset(&mm->bt_stats, 0, sizeof(struct badger_trap_stats));
+	}
 
 	up_write(&mm->mmap_sem);
-}
 
-void badger_trap_init_all(struct mm_struct *mm)
-{
-	badger_trap_init(mm, 0, ~0ull);
+	if (!init) {
+		mmdrop(mm);
+	}
 }
+EXPORT_SYMBOL(badger_trap_walk);
+
+void print_badger_trap_stats(const struct mm_struct *mm) {
+	struct vm_area_struct *vma;
+
+	pr_warn("===================================\n");
+	pr_warn("BadgerTrap: Statistics for Process %s\n",
+			mm->owner ? mm->owner->comm : "<unknown process>");
+	pr_warn("BadgerTrap: DTLB load miss for 4KB page detected %llu\n",
+			current->mm->bt_stats.total_dtlb_4kb_load_misses);
+	pr_warn("BadgerTrap: DTLB load miss for 2MB page detected %llu\n",
+			current->mm->bt_stats.total_dtlb_2mb_load_misses);
+	pr_warn("BadgerTrap: DTLB store miss for 4KB page detected %llu\n",
+			current->mm->bt_stats.total_dtlb_4kb_store_misses);
+	pr_warn("BadgerTrap: DTLB store miss for 2MB page detected %llu\n",
+			current->mm->bt_stats.total_dtlb_2mb_store_misses);
+	pr_warn("-----------------------------------\n");
+	for (vma = current->mm->mmap; vma; vma = vma->vm_next) {
+		pr_warn("BadgerTrap: [%lx, %lx]\n", vma->vm_start, vma->vm_end);
+		pr_warn("BadgerTrap: DTLB load miss for 4KB page detected %llu\n",
+				vma->bt_stats.total_dtlb_4kb_load_misses);
+		pr_warn("BadgerTrap: DTLB load miss for 2MB page detected %llu\n",
+				vma->bt_stats.total_dtlb_2mb_load_misses);
+		pr_warn("BadgerTrap: DTLB store miss for 4KB page detected %llu\n",
+				vma->bt_stats.total_dtlb_4kb_store_misses);
+		pr_warn("BadgerTrap: DTLB store miss for 2MB page detected %llu\n",
+				vma->bt_stats.total_dtlb_2mb_store_misses);
+	}
+	pr_warn("BadgerTrap: END Statistics\n");
+	pr_warn("===================================\n");
+}
+EXPORT_SYMBOL(print_badger_trap_stats);
