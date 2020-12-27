@@ -445,7 +445,7 @@ static int kbadgerd_do_work(void *data)
 			start_inspection();
 		}
 
-		pr_warn("kbadgerd: Sleeping %d ms.\n", KBADGERD_SLEEP_MS);
+		pr_warn_once("kbadgerd: Interval is %d ms.\n", KBADGERD_SLEEP_MS);
 		msleep(KBADGERD_SLEEP_MS);
 	}
 
