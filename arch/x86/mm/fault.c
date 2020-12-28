@@ -1208,11 +1208,11 @@ access_error(unsigned long error_code, struct vm_area_struct *vma)
 	}
 
 	/* read, present: */
-	pr_warn("HERE 20");
-	if (unlikely(error_code & X86_PF_PROT))
+	if (unlikely(error_code & X86_PF_PROT)) {
+		pr_warn("HERE 20");
 		return !((error_code & X86_PF_RSVD) &&
 				current->mm->badger_trap_enabled);
-	pr_warn("HERE 21");
+	}
 
 	/* read, not present: */
 	if (unlikely(!(vma->vm_flags & (VM_READ | VM_EXEC | VM_WRITE))))
@@ -1347,7 +1347,6 @@ bool do_user_addr_fault(struct pt_regs *regs,
 	 * in a region with pagefaults disabled then we must not take the fault
 	 */
 	if (unlikely(faulthandler_disabled() || !mm)) {
-		pr_warn("HERE 4");
 		bad_area_nosemaphore(regs, hw_error_code, address);
 		return false;
 	}
