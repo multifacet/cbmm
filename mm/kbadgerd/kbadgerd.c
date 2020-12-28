@@ -338,6 +338,12 @@ static void process_and_insert_current_range(void) {
 		return;
 	}
 
+	// If the region took no hits, then don't bother looking at it much more...
+	if (total_misses(&current_range->stats) == 0) {
+		kbadgerd_range_insert(&state.data, current_range);
+		return;
+	}
+
 	// We want the midpoint to end at a page-aligned boundary.
 	midpoint = (current_range->start
 		+ (current_range->end - current_range->start) / 2)
