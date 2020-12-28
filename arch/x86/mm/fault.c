@@ -1065,6 +1065,7 @@ mm_fault_error(struct pt_regs *regs, unsigned long error_code,
 		 */
 		pagefault_out_of_memory();
 	} else {
+		pr_warn("HERE 1");
 		if (fault & (VM_FAULT_SIGBUS|VM_FAULT_HWPOISON|
 			     VM_FAULT_HWPOISON_LARGE))
 			do_sigbus(regs, error_code, address, fault);
@@ -1286,6 +1287,7 @@ do_kern_addr_fault(struct pt_regs *regs, unsigned long hw_error_code,
 	 * Don't take the mm semaphore here. If we fixup a prefetch
 	 * fault we could otherwise deadlock:
 	 */
+	pr_warn("HERE 2");
 	bad_area_nosemaphore(regs, hw_error_code, address);
 }
 NOKPROBE_SYMBOL(do_kern_addr_fault);
@@ -1333,6 +1335,7 @@ bool do_user_addr_fault(struct pt_regs *regs,
 		     !(hw_error_code & X86_PF_USER) &&
 		     !(regs->flags & X86_EFLAGS_AC)))
 	{
+		pr_warn("HERE 3");
 		bad_area_nosemaphore(regs, hw_error_code, address);
 		return false;
 	}
@@ -1342,6 +1345,7 @@ bool do_user_addr_fault(struct pt_regs *regs,
 	 * in a region with pagefaults disabled then we must not take the fault
 	 */
 	if (unlikely(faulthandler_disabled() || !mm)) {
+		pr_warn("HERE 4");
 		bad_area_nosemaphore(regs, hw_error_code, address);
 		return false;
 	}
@@ -1404,6 +1408,7 @@ bool do_user_addr_fault(struct pt_regs *regs,
 			 * Fault from code in kernel from
 			 * which we do not expect faults.
 			 */
+			pr_warn("HERE 5");
 			bad_area_nosemaphore(regs, hw_error_code, address);
 			return false;
 		}
@@ -1420,16 +1425,19 @@ retry:
 
 	vma = find_vma(mm, address);
 	if (unlikely(!vma)) {
+		pr_warn("HERE 6");
 		bad_area(regs, hw_error_code, address);
 		return false;
 	}
 	if (likely(vma->vm_start <= address))
 		goto good_area;
 	if (unlikely(!(vma->vm_flags & VM_GROWSDOWN))) {
+		pr_warn("HERE 7");
 		bad_area(regs, hw_error_code, address);
 		return false;
 	}
 	if (unlikely(expand_stack(vma, address))) {
+		pr_warn("HERE 8");
 		bad_area(regs, hw_error_code, address);
 		return false;
 	}
@@ -1440,6 +1448,7 @@ retry:
 	 */
 good_area:
 	if (unlikely(access_error(hw_error_code, vma))) {
+		pr_warn("HERE 9");
 		bad_area_access_error(regs, hw_error_code, address, vma);
 		return false;
 	}
