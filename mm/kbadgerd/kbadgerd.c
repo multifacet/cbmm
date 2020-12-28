@@ -28,6 +28,7 @@ struct kbadgerd_range {
 	bool explored;
 
 	struct badger_trap_stats stats;
+	struct badger_trap_stats totals;
 };
 
 /* The internal state of kbadgerd. */
@@ -422,6 +423,7 @@ static void continue_inspection(void) {
 	// because we only want the data from this range.
 	memset(&range->stats, 0, sizeof(struct badger_trap_stats));
 	badger_trap_add_stats(&range->stats, &state.inspected_task->bt_stats);
+	badger_trap_add_stats(&range->totals, &state.inspected_task->bt_stats);
 
 	// Insert the current range back into the tree.
 	process_and_insert_current_range();
