@@ -1082,7 +1082,7 @@ static int collapse_huge_page(struct mm_struct *mm,
 	pgtable_trans_huge_deposit(mm, pmd, pgtable);
 	/* Make the page table entry as reserved for TLB miss tracking */
 	if(is_badger_trap_enabled(mm, address)) {
-		if (vma && !(vma->vm_flags & (VM_EXEC | VM_MAYEXEC))) {
+		if (vma && !(vma->vm_flags & VM_EXEC)) {
 			// TODO markm currently handle anon pages only
 			if (vma_is_anonymous(vma)) {
 				_pmd = pmd_mkreserve(_pmd);
