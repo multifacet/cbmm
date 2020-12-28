@@ -9,6 +9,7 @@
 
 extern char badger_trap_process[CONFIG_NR_CPUS][MAX_NAME_LEN];
 
+void silence(void);
 bool is_badger_trap_process(const char* proc_name);
 bool is_badger_trap_enabled(const struct mm_struct *mm, u64 address);
 inline pte_t pte_mkreserve(pte_t pte);

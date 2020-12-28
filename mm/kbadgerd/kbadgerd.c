@@ -223,6 +223,9 @@ static void start_inspection(void) {
 
 	BUG_ON(state.pid == 0);
 
+	// Avoid extra printing from badger trap.
+	silence();
+
 	// Get the task_struct and mm_struct to be inspected.
 	target_task = get_pid_task(find_get_pid(state.pid), PIDTYPE_PID);
 	if (!target_task) {

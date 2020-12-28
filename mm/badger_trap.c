@@ -10,6 +10,12 @@
 
 char badger_trap_process[CONFIG_NR_CPUS][MAX_NAME_LEN];
 
+static bool silent = false;
+
+void silence(void) {
+	silent = true;
+}
+
 /*
  * This syscall is generic way of setting up badger trap.
  * There are three options to start badger trap.
@@ -394,6 +400,8 @@ EXPORT_SYMBOL(badger_trap_walk);
 
 void print_badger_trap_stats(const struct mm_struct *mm) {
 	struct vm_area_struct *vma;
+
+	if (silent) return;
 
 	pr_warn("===================================\n");
 	pr_warn("BadgerTrap: Statistics for Process %s\n",
