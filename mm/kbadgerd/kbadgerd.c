@@ -389,8 +389,8 @@ static void process_and_insert_current_range(void) {
 static void continue_inspection(void) {
 	struct kbadgerd_range *range;
 
-	if (task_state_to_char(state.inspected_task) == 'X') {
-		pr_warn("kbadgerd: inspected process is dead. Ending inspection.\n");
+	if (state.inspected_task->flags & (PF_EXITING | PF_SIGNALED)) {
+		pr_warn("kbadgerd: inspected process is exiting. Ending inspection.\n");
 		end_inspection();
 		return;
 	}
