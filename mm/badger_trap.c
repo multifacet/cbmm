@@ -15,6 +15,7 @@ static bool silent = false;
 void silence(void) {
 	silent = true;
 }
+EXPORT_SYMBOL(silence);
 
 /*
  * This syscall is generic way of setting up badger trap.
