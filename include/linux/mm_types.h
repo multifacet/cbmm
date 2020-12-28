@@ -529,6 +529,12 @@ struct mm_struct {
 
 		/* BadgerTrap */
 		bool badger_trap_enabled;
+		// Used to check if badger trap was ever enabled for a process.
+		// This helps handle the race condition where bt was just
+		// turned off, but a racing #PF needs to check if the RSVD bit
+		// can be set. Basically, it is used to taint an address space,
+		// indicating that stray reserved bits are likely not an error.
+		bool badger_trap_was_enabled;
 		// The start and end addresses for badgertrap.
 		u64 badger_trap_start;
 		u64 badger_trap_end; // inclusive

@@ -351,6 +351,7 @@ void badger_trap_walk(struct mm_struct *mm, u64 lower, u64 upper, bool init)
 		// Round up to hpage boundary, but subtract 1 to make it inclusive.
 		mm->badger_trap_end = ((upper - 1) & HPAGE_PMD_MASK) + HPAGE_PMD_SIZE - 1;
 		mm->badger_trap_enabled = init;
+		mm->badger_trap_was_enabled = true;
 
 		// Clear previous stats.
 		memset(&mm->bt_stats, 0, sizeof(struct badger_trap_stats));

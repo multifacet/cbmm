@@ -673,7 +673,7 @@ struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
 {
 	unsigned long pfn;
 
-	if (vma->vm_mm && vma->vm_mm->badger_trap_enabled
+	if (vma->vm_mm && vma->vm_mm->badger_trap_was_enabled
 		&& is_pte_reserved(pte))
 	    pte = pte_unreserve(pte);
 
@@ -1130,7 +1130,7 @@ again:
 	do {
 		pte_t ptent;
 
-		if (vma->vm_mm && vma->vm_mm->badger_trap_enabled
+		if (vma->vm_mm && vma->vm_mm->badger_trap_was_enabled
 			&& is_pte_reserved(ptent))
 		{
 			*pte = pte_unreserve(*pte);
@@ -4158,7 +4158,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 	pte_t entry;
 	vm_fault_t ret;
 
-	if (vmf->vma->vm_mm && vmf->vma->vm_mm->badger_trap_enabled)
+	if (vmf->vma->vm_mm && vmf->vma->vm_mm->badger_trap_was_enabled)
 	{
 	    /*
 	     * I'm not sure when this would happen, but just in case: if we ever
@@ -4415,7 +4415,7 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	vmf.pud = pud_offset(p4d, address);
 
 	/* Check for transparent 1GB huge pages that are marked reserved. */
-	if (mm && mm->badger_trap_enabled && !(vmf.flags & FAULT_FLAG_INSTRUCTION)
+	if (mm && mm->badger_trap_was_enabled && !(vmf.flags & FAULT_FLAG_INSTRUCTION)
 		&& vmf.pud && pud_trans_huge(*vmf.pud))
 	{
 	    pud_t orig_pud = *vmf.pud;
@@ -4499,7 +4499,7 @@ retry_pud:
         /*
 	 * Here we check for transparent huge page that are marked as reserved
          */
-        if(mm && mm->badger_trap_enabled && !(vmf.flags & FAULT_FLAG_INSTRUCTION)
+        if(mm && mm->badger_trap_was_enabled && !(vmf.flags & FAULT_FLAG_INSTRUCTION)
 		&& vmf.pmd && pmd_trans_huge(*vmf.pmd))
         {
                 pmd_t orig_pmd = *vmf.pmd;

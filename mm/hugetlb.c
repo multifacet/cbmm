@@ -4088,7 +4088,7 @@ vm_fault_t hugetlb_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	 *
 	 * As of Linux 5.5.8, hugetlb doesn't apparently support 1GB pages.
 	 */
-	if(mm && mm->badger_trap_enabled
+	if(mm && mm->badger_trap_was_enabled
 		&& !(flags & FAULT_FLAG_INSTRUCTION) && ptep)
 	{
 		mapping = vma->vm_file->f_mapping;
