@@ -2303,7 +2303,7 @@ int zap_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	if (!ptl)
 		return 0;
 
-	if (vma->vm_mm->badger_trap_enabled && is_pmd_reserved(*pmd)) {
+	if (vma->vm_mm->badger_trap_was_enabled && is_pmd_reserved(*pmd)) {
 		*pmd = pmd_unreserve(*pmd);
 	}
 
@@ -2573,7 +2573,7 @@ int zap_huge_pud(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	if (!ptl)
 		return 0;
 
-	if (vma->vm_mm->badger_trap_enabled && is_pud_reserved(*pud)) {
+	if (vma->vm_mm->badger_trap_was_enabled && is_pud_reserved(*pud)) {
 		*pud = pud_unreserve(*pud);
 	}
 

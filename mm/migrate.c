@@ -2098,7 +2098,7 @@ int migrate_misplaced_transhuge_page(struct mm_struct *mm,
 	 * Make the page table entry as reserved for TLB miss tracking
 	 * if the PMD was marked as reserved.
 	 */
-	//if(is_old_reserved && mm && mm->badger_trap_enabled) // TODO markm uncomment
+	//if(is_old_reserved && mm && mm->badger_trap_was_enabled) // TODO markm uncomment
 	//	entry = pmd_mkreserve(entry);
 
 	/*

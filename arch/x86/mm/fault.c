@@ -1211,7 +1211,7 @@ access_error(unsigned long error_code, struct vm_area_struct *vma)
 	if (unlikely(error_code & X86_PF_PROT)) {
 		pr_warn("HERE 20");
 		return !((error_code & X86_PF_RSVD) &&
-				current->mm->badger_trap_enabled);
+				current->mm->badger_trap_was_enabled);
 	}
 
 	/* read, not present: */
@@ -1323,7 +1323,7 @@ bool do_user_addr_fault(struct pt_regs *regs,
 	 * entries in the user portion of the page tables.
 	 */
 	if (unlikely(hw_error_code & X86_PF_RSVD) &&
-			!current->mm->badger_trap_enabled)
+			!current->mm->badger_trap_was_enabled)
 		pgtable_bad(regs, hw_error_code, address);
 
 	/*
