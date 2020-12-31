@@ -4026,17 +4026,21 @@ static int hugetlb_fake_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 		return VM_FAULT_SIGBUS;
 
 	/* Here where we do all our analysis */
+	spin_lock(&mm->bt_stats->lock);
 	if (flags & FAULT_FLAG_WRITE)
-	    current->bt_stats.total_dtlb_2mb_store_misses++;
+	    mm->bt_stats->total_dtlb_2mb_store_misses++;
 	else
-	    current->bt_stats.total_dtlb_2mb_load_misses++;
+	    mm->bt_stats->total_dtlb_2mb_load_misses++;
+	spin_unlock(&mm->bt_stats->lock);
 
+	/*
 	if (vma) {
 		if (flags & FAULT_FLAG_WRITE)
 		    vma->bt_stats.total_dtlb_2mb_store_misses++;
 		else
 		    vma->bt_stats.total_dtlb_2mb_load_misses++;
 	}
+	*/
 
 	*page_table = pte_mkreserve(*page_table);
 	return 0;

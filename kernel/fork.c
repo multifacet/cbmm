@@ -1050,7 +1050,8 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	mm->user_ns = get_user_ns(user_ns);
 
 	// Clear badger trap stats for new address space...
-	memset(&mm->bt_stats, 0, sizeof(struct badger_trap_stats));
+	badger_trap_set_stats_loc(mm, NULL);
+	badger_trap_stats_init(mm->bt_stats);
 	init_rwsem(&mm->badger_trap_page_table_sem);
 
 	return mm;

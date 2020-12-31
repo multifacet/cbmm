@@ -713,7 +713,6 @@ void __noreturn do_exit(long code)
 {
 	struct task_struct *tsk = current;
 	int group_dead;
-	static DEFINE_MUTEX(result_mutex);
 
 	profile_task_exit(tsk);
 	kcov_task_exit(tsk);
@@ -724,13 +723,12 @@ void __noreturn do_exit(long code)
 	if(current->mm && current->mm->badger_trap_enabled)
 	{
 		// Each thread will print. We just need to take the last one.
-		mutex_lock(&result_mutex);
-		badger_trap_add_stats(&current->mm->bt_stats, &current->bt_stats);
+		spin_lock(&current->mm->bt_stats->lock);
 		pr_warn("BadgerTrap: Task terminating. current=%p pid=%d tgid=%d mm=%p parent_pid=%d\n",
 				current, current->pid, current->tgid, current->mm,
 				current->real_parent->pid);
 		print_badger_trap_stats(current->mm);
-		mutex_unlock(&result_mutex);
+		spin_unlock(&current->mm->bt_stats->lock);
 	}
 
 	/* markm: doesn't seem to work properly if main thread exits not-last.

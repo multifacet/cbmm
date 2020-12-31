@@ -300,6 +300,16 @@ static int bt_init_test_walk(unsigned long addr, unsigned long next,
 	return 0;
 }
 
+void badger_trap_set_stats_loc(struct mm_struct *mm, struct badger_trap_stats *stats)
+{
+	BUG_ON(!mm);
+	if (stats)
+		mm->bt_stats = stats;
+	else
+		mm->bt_stats = &mm->bt_stats_inner;
+}
+EXPORT_SYMBOL(badger_trap_set_stats_loc);
+
 /*
  * This function walks the page tables of the given mm_struct for pages mapped
  * between the given lower and upper addresses (inclusive). Depending on the
@@ -352,9 +362,7 @@ void badger_trap_walk(struct mm_struct *mm, u64 lower, u64 upper, bool init)
 		mm->badger_trap_end = ((upper - 1) & HPAGE_PMD_MASK) + HPAGE_PMD_SIZE - 1;
 		mm->badger_trap_enabled = init;
 		mm->badger_trap_was_enabled = true;
-
-		// Clear previous stats.
-		memset(&mm->bt_stats, 0, sizeof(struct badger_trap_stats));
+		badger_trap_stats_clear(mm->bt_stats);
 	}
 
 	// Block any other page faults from changing the mappings while we walk.
@@ -387,9 +395,7 @@ void badger_trap_walk(struct mm_struct *mm, u64 lower, u64 upper, bool init)
 		mm->badger_trap_start = lower & HPAGE_PMD_MASK;
 		// Round up to hpage boundary, but subtract 1 to make it inclusive.
 		mm->badger_trap_end = ((upper - 1) & HPAGE_PMD_MASK) + HPAGE_PMD_SIZE - 1;
-
-		// Clear previous stats.
-		memset(&mm->bt_stats, 0, sizeof(struct badger_trap_stats));
+		badger_trap_stats_clear(mm->bt_stats);
 	}
 
 	up_write(&mm->mmap_sem);
@@ -401,7 +407,7 @@ void badger_trap_walk(struct mm_struct *mm, u64 lower, u64 upper, bool init)
 EXPORT_SYMBOL(badger_trap_walk);
 
 void print_badger_trap_stats(const struct mm_struct *mm) {
-	struct vm_area_struct *vma;
+	//struct vm_area_struct *vma;
 
 	if (silent) return;
 
@@ -409,15 +415,16 @@ void print_badger_trap_stats(const struct mm_struct *mm) {
 	pr_warn("BadgerTrap: Statistics for Process %s\n",
 			mm->owner ? mm->owner->comm : "<unknown process>");
 	pr_warn("BadgerTrap: DTLB load miss for 4KB page detected %llu\n",
-			current->mm->bt_stats.total_dtlb_4kb_load_misses);
+			mm->bt_stats->total_dtlb_4kb_load_misses);
 	pr_warn("BadgerTrap: DTLB load miss for 2MB page detected %llu\n",
-			current->mm->bt_stats.total_dtlb_2mb_load_misses);
+			mm->bt_stats->total_dtlb_2mb_load_misses);
 	pr_warn("BadgerTrap: DTLB store miss for 4KB page detected %llu\n",
-			current->mm->bt_stats.total_dtlb_4kb_store_misses);
+			mm->bt_stats->total_dtlb_4kb_store_misses);
 	pr_warn("BadgerTrap: DTLB store miss for 2MB page detected %llu\n",
-			current->mm->bt_stats.total_dtlb_2mb_store_misses);
+			mm->bt_stats->total_dtlb_2mb_store_misses);
+	/*
 	pr_warn("-----------------------------------\n");
-	for (vma = current->mm->mmap; vma; vma = vma->vm_next) {
+	for (vma = mm->mmap; vma; vma = vma->vm_next) {
 		pr_warn("BadgerTrap: [%lx, %lx]\n", vma->vm_start, vma->vm_end);
 		pr_warn("BadgerTrap: DTLB load miss for 4KB page detected %llu\n",
 				vma->bt_stats.total_dtlb_4kb_load_misses);
@@ -429,6 +436,7 @@ void print_badger_trap_stats(const struct mm_struct *mm) {
 				vma->bt_stats.total_dtlb_2mb_store_misses);
 	}
 	pr_warn("BadgerTrap: END Statistics\n");
+	*/
 	pr_warn("===================================\n");
 }
 EXPORT_SYMBOL(print_badger_trap_stats);

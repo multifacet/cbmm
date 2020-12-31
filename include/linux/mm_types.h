@@ -354,7 +354,7 @@ struct vm_area_struct {
 #endif
 	struct vm_userfaultfd_ctx vm_userfaultfd_ctx;
 
-	struct badger_trap_stats bt_stats;
+	//struct badger_trap_stats bt_stats;
 } __randomize_layout;
 
 struct core_thread {
@@ -539,7 +539,11 @@ struct mm_struct {
 		u64 badger_trap_start;
 		u64 badger_trap_end; // inclusive
 		// Counters for TLB misses for badgertrap.
-		struct badger_trap_stats bt_stats;
+		//
+		// Always access through bt_stats. If it doesn't point
+		// somewhere else, this pointer will point at bt_stats_inner.
+		struct badger_trap_stats *bt_stats;
+		struct badger_trap_stats bt_stats_inner;
 		// Ordering: grab mmap_sem before this one.
 		struct rw_semaphore badger_trap_page_table_sem;
 	} __randomize_layout;

@@ -4119,17 +4119,21 @@ static int do_fake_page_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	}
 
 	/* Here where we do all our analysis */
+	spin_lock(&mm->bt_stats->lock);
 	if (flags & FAULT_FLAG_WRITE)
-	    current->bt_stats.total_dtlb_4kb_store_misses++;
+	    mm->bt_stats->total_dtlb_4kb_store_misses++;
 	else
-	    current->bt_stats.total_dtlb_4kb_load_misses++;
+	    mm->bt_stats->total_dtlb_4kb_load_misses++;
+	spin_unlock(&mm->bt_stats->lock);
 
+	/*
 	if (vma) {
 	    if (flags & FAULT_FLAG_WRITE)
 		vma->bt_stats.total_dtlb_4kb_store_misses++;
 	    else
 		vma->bt_stats.total_dtlb_4kb_load_misses++;
 	}
+	*/
 
 	pte_offset_map_lock(mm, pmd, address, &ptl);
 	*page_table = pte_mkreserve(*page_table);
@@ -4363,17 +4367,21 @@ static int transparent_fake_fault(struct vm_fault *vmf)
                 return VM_FAULT_SIGBUS;
 
         /* Here where we do all our analysis */
+	spin_lock(&vmf->vma->vm_mm->bt_stats->lock);
 	if (vmf->flags & FAULT_FLAG_WRITE)
-	    current->bt_stats.total_dtlb_2mb_store_misses++;
+	    vmf->vma->vm_mm->bt_stats->total_dtlb_2mb_store_misses++;
 	else
-	    current->bt_stats.total_dtlb_2mb_load_misses++;
+	    vmf->vma->vm_mm->bt_stats->total_dtlb_2mb_load_misses++;
+	spin_unlock(&vmf->vma->vm_mm->bt_stats->lock);
 
+	/*
 	if (vmf->vma) {
 	    if (vmf->flags & FAULT_FLAG_WRITE)
 		vmf->vma->bt_stats.total_dtlb_2mb_store_misses++;
 	    else
 		vmf->vma->bt_stats.total_dtlb_2mb_load_misses++;
 	}
+	*/
 
         *vmf->pmd = pmd_mkreserve(*vmf->pmd);
         return 0;

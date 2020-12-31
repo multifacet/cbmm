@@ -21,6 +21,7 @@ inline int is_pmd_reserved(pmd_t pmd);
 inline pud_t pud_mkreserve(pud_t pud);
 inline pud_t pud_unreserve(pud_t pud);
 inline int is_pud_reserved(pud_t pud);
+void badger_trap_set_stats_loc(struct mm_struct *mm, struct badger_trap_stats *stats);
 void badger_trap_walk(struct mm_struct *mm, u64 lower, u64 upper, bool init);
 void print_badger_trap_stats(const struct mm_struct *mm);
 

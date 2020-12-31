@@ -18,6 +18,13 @@
 #define KBADGERD_SLEEP_MS 500
 #define RANGE_SIZE_THRESHOLD HPAGE_PMD_SIZE
 
+// The minimum number of tlb misses for us to consider looking into a range.
+// TODO: this probably should be in units of misses per page or something like
+// that -- that is, for larger regions, it probably makes sense to require more
+// misses. Also, it should depend on the cost of a TLB miss: the cost of the
+// TLB misses should exceed the CPU cost of the sampling.
+#define RANGE_IRRELEVANCE_THRESHOLD 0
+
 struct kbadgerd_range {
 	struct rb_node node;
 
@@ -179,20 +186,17 @@ static void set_range_iterations(struct kbadgerd_range *range) {
 static void start_badger_trap(struct kbadgerd_range *range) {
 	BUG_ON(!range);
 
-	// Reset the counters.
-	state.inspected_task->bt_stats.total_dtlb_4kb_load_misses = 0;
-	state.inspected_task->bt_stats.total_dtlb_2mb_load_misses = 0;
-	state.inspected_task->bt_stats.total_dtlb_4kb_store_misses = 0;
-	state.inspected_task->bt_stats.total_dtlb_2mb_store_misses = 0;
-
 	set_range_iterations(range);
 
 	// Turn on badger trap for the next range.
+	badger_trap_set_stats_loc(state.mm, &range->stats);
+	badger_trap_stats_clear(state.mm->bt_stats);
 	badger_trap_walk(state.mm, range->start, range->end - 1, true);
 }
 
 static void print_data(struct kbadgerd_range *range) {
-	pr_warn("kbadgerd: [%llx, %llx)", range->start, range->end);
+	pr_warn("kbadgerd: [%llx, %llx) (%lld bytes)", range->start, range->end,
+			range->end - range->start);
 	pr_warn("kbadgerd: \t4KB load misses: %lld", range->stats.total_dtlb_4kb_load_misses);
 	pr_warn("kbadgerd: \t4KB store misses: %lld", range->stats.total_dtlb_4kb_store_misses);
 	pr_warn("kbadgerd: \t2MB load misses: %lld", range->stats.total_dtlb_2mb_load_misses);
@@ -259,6 +263,9 @@ static void start_inspection(void) {
 			break;
 		}
 
+		badger_trap_stats_init(&new_range->stats);
+		badger_trap_stats_init(&new_range->totals);
+
 		new_range->start = vma->vm_start;
 		new_range->end = vma->vm_end;
 
@@ -296,12 +303,15 @@ static void end_inspection(void) {
 
 	// Collect final stats...
 	if (state.current_range) {
-		badger_trap_add_stats(&state.current_range->stats,
-				&state.inspected_task->bt_stats);
+		badger_trap_walk(state.mm,
+				state.current_range->start,
+				state.current_range->end - 1,
+				false);
 
 		// Add it back to the tree for simplicity.
 		kbadgerd_range_insert(&state.data, state.current_range);
 		state.current_range = NULL;
+		badger_trap_set_stats_loc(state.mm, NULL);
 	}
 
 	// Print all stats.
@@ -343,7 +353,7 @@ static void process_and_insert_current_range(void) {
 	}
 
 	// If the region took no hits, then don't bother looking at it much more...
-	if (total_misses(&current_range->stats) == 0) {
+	if (total_misses(&current_range->stats) <= RANGE_IRRELEVANCE_THRESHOLD) {
 		kbadgerd_range_insert(&state.data, current_range);
 		return;
 	}
@@ -381,6 +391,13 @@ static void process_and_insert_current_range(void) {
 		return;
 	}
 
+	badger_trap_stats_init(&new_left_range->stats);
+	badger_trap_stats_init(&new_right_range->stats);
+	badger_trap_stats_init(&new_left_range->totals);
+	badger_trap_stats_init(&new_right_range->totals);
+
+	// TODO markm: bijan suggested taking stats/2 for each half...
+
 	new_left_range->start = current_range->start;
 	new_left_range->end = midpoint;
 	new_left_range->stats = current_range->stats;
@@ -417,13 +434,11 @@ static void continue_inspection(void) {
 	range = state.current_range;
 
 	// Turn off bt for the outgoing range.
+	badger_trap_set_stats_loc(state.mm, NULL);
 	badger_trap_walk(state.mm, range->start, range->end - 1, false);
 
-	// Save the data since the previous iteration. We clear the data
-	// because we only want the data from this range.
-	memset(&range->stats, 0, sizeof(struct badger_trap_stats));
-	badger_trap_add_stats(&range->stats, &state.inspected_task->bt_stats);
-	badger_trap_add_stats(&range->totals, &state.inspected_task->bt_stats);
+	// Accumulate the changes from the last sampling period.
+	badger_trap_add_stats(&range->totals, &range->stats);
 
 	// Insert the current range back into the tree.
 	process_and_insert_current_range();
