@@ -267,12 +267,12 @@ static void print_data(struct kbadgerd_range *range) {
 
 static void print_all_data(void) {
 	struct kbadgerd_range *range;
-	struct rb_node *node = rb_first_cached(&state.data);
+	struct rb_node *node = rb_first(&state.range);
 
 	pr_warn("kbadgerd: Results of inspection for pid=%d\n", state.pid);
 
 	while (node) {
-		range = container_of(node, struct kbadgerd_range, data_node);
+		range = container_of(node, struct kbadgerd_range, range_node);
 		print_data(range);
 
 		node = rb_next(node);
