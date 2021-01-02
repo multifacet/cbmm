@@ -283,11 +283,11 @@ static int bt_init_hugetlb_entry(pte_t *ptep, unsigned long hmask,
 static int bt_init_test_walk(unsigned long addr, unsigned long next,
 	struct mm_walk *walk)
 {
-	pr_warn("test_walk(addr=%lx, next=%lx, mm=%p, vma=%p is_exec=%d may_exec=%d is_anon=%d\n",
-			addr, next, walk->mm, walk->vma,
-			walk->vma && (walk->vma->vm_flags & VM_EXEC),
-			walk->vma && (walk->vma->vm_flags & VM_MAYEXEC),
-			walk->vma && vma_is_anonymous(walk->vma));
+	//pr_warn("test_walk(addr=%lx, next=%lx, mm=%p, vma=%p is_exec=%d may_exec=%d is_anon=%d\n",
+	//		addr, next, walk->mm, walk->vma,
+	//		walk->vma && (walk->vma->vm_flags & VM_EXEC),
+	//		walk->vma && (walk->vma->vm_flags & VM_MAYEXEC),
+	//		walk->vma && vma_is_anonymous(walk->vma));
 
 	// Skip unmapped regions
 	if (!walk->vma)
