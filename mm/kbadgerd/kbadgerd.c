@@ -61,6 +61,8 @@ struct kbadgerd_state {
 	/* The data collected by inspection. */
 	struct rb_root_cached data;
 
+	struct rb_root_cached old_data;
+
 	/* The number of ranges in `data`. */
 	u64 num_ranges;
 
@@ -220,6 +222,16 @@ static void print_all_data(void) {
 		node = rb_next(node);
 	}
 
+	pr_warn("kbadgerd: Discarded ranges for pid=%d\n", state.pid);
+	node = rb_first_cached(&state.old_data);
+
+	while (node) {
+		range = container_of(node, struct kbadgerd_range, node);
+		print_data(range);
+
+		node = rb_next(node);
+	}
+
 	pr_warn("kbadgerd: END Results of inspection for pid=%d\n", state.pid);
 }
 
@@ -254,6 +266,7 @@ static void start_inspection(void) {
 	down_read(&state.mm->mmap_sem);
 
 	state.data = RB_ROOT_CACHED;
+	state.old_data = RB_ROOT_CACHED;
 
 	state.num_ranges = 0;
 	state.current_range = NULL;
@@ -323,6 +336,9 @@ static void end_inspection(void) {
 
 	// Free the tree.
 	while ((range = kbadgerd_range_remove_max(&state.data))) { // NOTE: assignment
+		vfree(range);
+	}
+	while ((range = kbadgerd_range_remove_max(&state.old_data))) { // NOTE: assignment
 		vfree(range);
 	}
 
@@ -414,7 +430,7 @@ static void process_and_insert_current_range(void) {
 	kbadgerd_range_insert(&state.data, new_right_range);
 
 	state.current_range = NULL;
-	vfree(current_range);
+	kbadgerd_range_insert(&state.old_data, current_range);
 }
 
 static void continue_inspection(void) {
