@@ -16,6 +16,7 @@
 #include <linux/rbtree.h>
 
 #define KBADGERD_SLEEP_MS 500
+#define KBADGERD_NEW_VMA_CHECK_RATE 4
 #define RANGE_SIZE_THRESHOLD HPAGE_PMD_SIZE
 
 // The minimum number of tlb misses for us to consider looking into a range.
@@ -26,7 +27,8 @@
 #define RANGE_IRRELEVANCE_THRESHOLD 0
 
 struct kbadgerd_range {
-	struct rb_node node;
+	struct rb_node data_node;
+	struct rb_node range_node;
 
 	u64 start;
 	u64 end; // exclusive
@@ -65,6 +67,9 @@ struct kbadgerd_state {
 	struct rb_root_cached data;
 
 	struct rb_root_cached old_data;
+
+	/* List of the VMA ranges tracked to detect new ranges */
+	struct rb_root range;
 
 	/* The number of ranges in `data`. */
 	u64 num_ranges;
@@ -136,16 +141,18 @@ static int kbadgerd_range_cmp(
 		return 0;
 }
 
-static void
-kbadgerd_range_insert(struct rb_root_cached *root, struct kbadgerd_range *new_range)
+static void kbadgerd_range_insert(
+		struct rb_root_cached *data_root,
+		struct rb_root *range_root,
+		struct kbadgerd_range *new_range)
 {
-	struct rb_node **new = &(root->rb_root.rb_node), *parent = NULL;
+	struct rb_node **new = &(data_root->rb_root.rb_node), *parent = NULL;
 	bool is_leftmost = true;
 
-	/* Figure out where to put new node */
+	/* Figure out where to put new node in the data rb tree */
 	while (*new) {
 		struct kbadgerd_range *this =
-			container_of(*new, struct kbadgerd_range, node);
+			container_of(*new, struct kbadgerd_range, data_node);
 		int result = kbadgerd_range_cmp(new_range, this);
 
 		parent = *new;
@@ -160,11 +167,57 @@ kbadgerd_range_insert(struct rb_root_cached *root, struct kbadgerd_range *new_ra
 	}
 
 	/* Add new node and rebalance tree. */
-	rb_link_node(&new_range->node, parent, new);
-	rb_insert_color_cached(&new_range->node, root, is_leftmost);
+	rb_link_node(&new_range->data_node, parent, new);
+	rb_insert_color_cached(&new_range->data_node, data_root, is_leftmost);
+
+	/* Figure out where to put the new node in the range rb tree */
+	if (!range_root)
+		return;
+
+	new = &(range_root->rb_node);
+	parent = NULL;
+	while (*new) {
+		struct kbadgerd_range *this =
+			container_of(*new, struct kbadgerd_range, range_node);
+
+		/* The ranges should not overlap*/
+		if (new_range->start == this->start || new_range->end == this->end) {
+			return;
+		}
+
+		parent = *new;
+		if (new_range->start < this->start)
+			new = &((*new)->rb_left);
+		else
+			new = &((*new)->rb_right);
+	}
+
+	rb_link_node(&new_range->range_node, parent, new);
+}
+
+static void kbadgerd_remove_from_range_rb_tree(
+		struct rb_root *root,
+		struct kbadgerd_range *range_to_remove)
+{
+	struct rb_node *node = root->rb_node;
+	struct kbadgerd_range *range;
+
+	while (node) {
+	    range = container_of(node, struct kbadgerd_range, range_node);
+
+	    if (range_to_remove->start < range->start) {
+	        node = node->rb_left;
+	    } else if (range_to_remove->start > range->start) {
+	        node = node->rb_right;
+	    } else {
+	        rb_erase(node, root);
+	        break;
+	    }
+	}
 }
 
 /* NOTE: max = first, so we can take advantage of rb_root_cached. */
+/* Only remove from the data rb tree to avoid accidentally adding the same range twice */
 static struct kbadgerd_range *
 kbadgerd_range_remove_max(struct rb_root_cached *root)
 {
@@ -174,7 +227,7 @@ kbadgerd_range_remove_max(struct rb_root_cached *root)
 	if (!max_node)
 		return NULL;
 
-	max = container_of(max_node, struct kbadgerd_range, node);
+	max = container_of(max_node, struct kbadgerd_range, data_node);
 	rb_erase_cached(max_node, root);
 
 	return max;
@@ -219,7 +272,7 @@ static void print_all_data(void) {
 	pr_warn("kbadgerd: Results of inspection for pid=%d\n", state.pid);
 
 	while (node) {
-		range = container_of(node, struct kbadgerd_range, node);
+		range = container_of(node, struct kbadgerd_range, data_node);
 		print_data(range);
 
 		node = rb_next(node);
@@ -229,13 +282,93 @@ static void print_all_data(void) {
 	node = rb_first_cached(&state.old_data);
 
 	while (node) {
-		range = container_of(node, struct kbadgerd_range, node);
+		range = container_of(node, struct kbadgerd_range, data_node);
 		print_data(range);
 
 		node = rb_next(node);
 	}
 
 	pr_warn("kbadgerd: END Results of inspection for pid=%d\n", state.pid);
+}
+
+static struct kbadgerd_range *
+kbadgerd_is_new_range(struct rb_root *root, struct vm_area_struct *vma) {
+	struct rb_node *node = root->rb_node;
+	struct kbadgerd_range *range;
+	struct kbadgerd_range *new_range;
+	u64 max_start = 0;
+	u64 min_end = 0;
+
+	while (node) {
+	    range = container_of(node, struct kbadgerd_range, range_node);
+
+	    // If the range is the same or entirely in another range, continue
+	    if (vma->vm_start >= range->start && vma->vm_end <= range->end) {
+	        return NULL;
+	    }
+	    // If the start of the range is within an old range and the end is outside
+	    // of the old range, we may need to create a new range at the end of the old
+	    // range. This can happen if the VMA grows up from the end
+	    // If the range keeps growing, there can be multiple ranges between the VMA
+	    // start and end, so make sure to get the largest one
+	    if (vma->vm_start < range->end && vma->vm_end > range->end) {
+	        if (max_start < range->end)
+	            max_start = range->end;
+	    }
+	    // Same as above, but for if the VMA grows down from the start
+	    if (vma->vm_start < range->start && vma->vm_end > range->start) {
+	        if (min_end > range->start)
+	            min_end = range->start;
+	    }
+
+	    // Traverse the tree
+	    if (vma->vm_start < range->start)
+	        node = node->rb_left;
+	    else
+	        node = node->rb_right;
+	}
+
+	new_range =
+	    (struct kbadgerd_range *)vzalloc(sizeof(struct kbadgerd_range));
+
+	if (!new_range) {
+	    pr_err("kbadgerd: Unable to alloc new range! Skipping.");
+	    return NULL;
+	}
+
+	    badger_trap_stats_init(&new_range->stats);
+	    badger_trap_stats_init(&new_range->totals);
+
+	if (max_start != 0) {
+	    new_range->start = max_start;
+	    new_range->end = vma->vm_end;
+	} else if (min_end != 0) {
+	    new_range->start = vma->vm_start;
+	    new_range->end = min_end;
+	} else {
+	    new_range->start = vma->vm_start;
+	    new_range->end = vma->vm_end;
+	}
+
+	return new_range;
+}
+
+static void check_for_new_vmas(void) {
+	struct vm_area_struct *vma = NULL;
+	struct kbadgerd_range *range;
+
+	down_read(&state.mm->mmap_sem);
+
+	for (vma = state.mm->mmap; vma; vma = vma->vm_next) {
+	    range = kbadgerd_is_new_range(&state.range, vma);
+
+	    if (range) {
+	        kbadgerd_range_insert(&state.data, &state.range, range);
+	        state.num_ranges += 1;
+	    }
+	}
+
+	up_read(&state.mm->mmap_sem);
 }
 
 static void start_inspection(void) {
@@ -270,6 +403,7 @@ static void start_inspection(void) {
 
 	state.data = RB_ROOT_CACHED;
 	state.old_data = RB_ROOT_CACHED;
+	state.range = RB_ROOT;
 
 	state.num_ranges = 0;
 	state.current_range = NULL;
@@ -289,7 +423,7 @@ static void start_inspection(void) {
 		new_range->start = vma->vm_start;
 		new_range->end = vma->vm_end;
 
-		kbadgerd_range_insert(&state.data, new_range);
+		kbadgerd_range_insert(&state.data, &state.range, new_range);
 		state.num_ranges += 1;
 
 		i += 1;
@@ -332,7 +466,7 @@ static void end_inspection(void) {
 				&state.current_range->stats);
 
 		// Add it back to the tree for simplicity.
-		kbadgerd_range_insert(&state.data, state.current_range);
+		kbadgerd_range_insert(&state.data, NULL, state.current_range);
 		state.current_range = NULL;
 		badger_trap_set_stats_loc(state.mm, NULL);
 	}
@@ -371,16 +505,19 @@ static void process_and_insert_current_range(void) {
 	// the next scan should we choose not to split it.
 	current_range->explored = true;
 
+	// Remove the range from the range rb tree because it might be split
+	kbadgerd_remove_from_range_rb_tree(&state.range, current_range);
+
 	// If the size of the current range is smaller than the threshold, we
 	// don't try to break it down further. Just insert it back to the tree.
 	if (current_range->end - current_range->start <= RANGE_SIZE_THRESHOLD) {
-		kbadgerd_range_insert(&state.data, current_range);
+		kbadgerd_range_insert(&state.data, &state.range, current_range);
 		return;
 	}
 
 	// If the region took no hits, then don't bother looking at it much more...
 	if (total_misses(&current_range->stats) <= RANGE_IRRELEVANCE_THRESHOLD) {
-		kbadgerd_range_insert(&state.data, current_range);
+		kbadgerd_range_insert(&state.data, &state.range, current_range);
 		return;
 	}
 
@@ -392,7 +529,7 @@ static void process_and_insert_current_range(void) {
 	// Range is too small to split further. If RANGE_SIZE_THRESHOLD is
 	// large enough, this should never happen.
 	if (current_range->start == midpoint || current_range->end == midpoint) {
-		kbadgerd_range_insert(&state.data, current_range);
+		kbadgerd_range_insert(&state.data, &state.range, current_range);
 		return;
 	}
 
@@ -403,7 +540,7 @@ static void process_and_insert_current_range(void) {
 
 	if (!new_left_range) {
 		pr_err("kbadgerd: Unable to alloc new range! Reusing old.");
-		kbadgerd_range_insert(&state.data, current_range);
+		kbadgerd_range_insert(&state.data, &state.range, current_range);
 		return;
 	}
 
@@ -412,7 +549,7 @@ static void process_and_insert_current_range(void) {
 
 	if (!new_right_range) {
 		pr_err("kbadgerd: Unable to alloc new range! Reusing old.");
-		kbadgerd_range_insert(&state.data, current_range);
+		kbadgerd_range_insert(&state.data, &state.range, current_range);
 		vfree(new_left_range);
 		return;
 	}
@@ -432,11 +569,11 @@ static void process_and_insert_current_range(void) {
 	new_right_range->end = current_range->end;
 	new_right_range->stats = current_range->stats;
 
-	kbadgerd_range_insert(&state.data, new_left_range);
-	kbadgerd_range_insert(&state.data, new_right_range);
+	kbadgerd_range_insert(&state.data, &state.range, new_left_range);
+	kbadgerd_range_insert(&state.data, &state.range, new_right_range);
 
 	state.current_range = NULL;
-	kbadgerd_range_insert(&state.old_data, current_range);
+	kbadgerd_range_insert(&state.old_data, NULL, current_range);
 }
 
 static void continue_inspection(void) {
@@ -486,6 +623,8 @@ static void continue_inspection(void) {
 /* The main loop of kbadgerd. */
 static int kbadgerd_do_work(void *data)
 {
+        u32 i = 0;
+
 	while (!kbadgerd_should_stop) {
 		if (state.active && state.pid_changed) {
 			pr_warn("kbadgerd: pid changed. Ending inspection.");
@@ -493,11 +632,15 @@ static int kbadgerd_do_work(void *data)
 		}
 
 		if (state.active) {
+                        if (i % KBADGERD_NEW_VMA_CHECK_RATE == 0) {
+                            check_for_new_vmas();
+                        }
 			continue_inspection();
 		} else if (state.pid != 0) {
 			start_inspection();
 		}
 
+                i++;
 		pr_warn_once("kbadgerd: Interval is %d ms.\n", state.sleep_interval);
 		msleep(state.sleep_interval);
 	}
