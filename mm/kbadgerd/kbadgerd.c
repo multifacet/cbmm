@@ -197,11 +197,11 @@ static void start_badger_trap(struct kbadgerd_range *range) {
 static void print_data(struct kbadgerd_range *range) {
 	pr_warn("kbadgerd: [%llx, %llx) (%lld bytes)", range->start, range->end,
 			range->end - range->start);
-	if (total_misses(&range->stats)) {
-		pr_warn("kbadgerd: \t4KB load misses: %lld", range->stats.total_dtlb_4kb_load_misses);
-		pr_warn("kbadgerd: \t4KB store misses: %lld", range->stats.total_dtlb_4kb_store_misses);
-		pr_warn("kbadgerd: \t2MB load misses: %lld", range->stats.total_dtlb_2mb_load_misses);
-		pr_warn("kbadgerd: \t2MB store misses: %lld\n", range->stats.total_dtlb_2mb_store_misses);
+	if (total_misses(&range->totals)) {
+		pr_warn("kbadgerd: \t4KB load misses: %lld", range->totals.total_dtlb_4kb_load_misses);
+		pr_warn("kbadgerd: \t4KB store misses: %lld", range->totals.total_dtlb_4kb_store_misses);
+		pr_warn("kbadgerd: \t2MB load misses: %lld", range->totals.total_dtlb_2mb_load_misses);
+		pr_warn("kbadgerd: \t2MB store misses: %lld\n", range->totals.total_dtlb_2mb_store_misses);
 	} else {
 		pr_warn("kbadgerd: \tNo misses\n");
 	}
