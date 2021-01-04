@@ -171,8 +171,12 @@ def compute_tick_spacing():
     NTICKS = 40
 
     raw_interval = int(width / (NTICKS - 1))
+    interval = (raw_interval >> 20) << 20
 
-    return (raw_interval >> 20) << 20
+    if interval == 0:
+        interval = (raw_interval >> 10) << 10
+
+    return interval
 
 axs[3].get_xaxis().set_major_formatter(ticker.FuncFormatter(to_hex))
 axs[3].get_xaxis().set_major_locator(ticker.MultipleLocator(compute_tick_spacing()))
