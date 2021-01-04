@@ -120,7 +120,7 @@ def plot_group(i):
             gap_offset += gaps[gap_idx][1]
             gap_idx += 1
 
-        print("start=%x new=%x" % (start, start-gap_offset))
+        #print("start=%x new=%x" % (start, start-gap_offset))
 
         rect = patches.Rectangle((start - gap_offset, 0), end-start, count,
                 fc=(0,0,1, 0.1), ec="r", linewidth=0.25)
@@ -170,4 +170,4 @@ axs[3].set_xlabel("Address")
 
 plt.tight_layout()
 
-plt.savefig("/tmp/test.pdf")
+plt.savefig("%s.pdf" % FILE)
