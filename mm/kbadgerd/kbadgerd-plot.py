@@ -163,8 +163,19 @@ def to_hex(x, pos):
         #print("x=%x s=%x l=%x o=%x" % (x, s, l, offset))
     #print("%x\n" % (x + offset))
     return '%x' % (x + offset)
+
+def compute_tick_spacing():
+    start, end = axs[3].get_xlim()
+    width = end - start
+
+    NTICKS = 40
+
+    raw_interval = int(width / (NTICKS - 1))
+
+    return (raw_interval >> 20) << 20
+
 axs[3].get_xaxis().set_major_formatter(ticker.FuncFormatter(to_hex))
-axs[3].get_xaxis().set_major_locator(ticker.MultipleLocator(1<<20))
+axs[3].get_xaxis().set_major_locator(ticker.MultipleLocator(compute_tick_spacing()))
 plt.setp(axs[3].xaxis.get_majorticklabels(), rotation=60)
 axs[3].set_xlabel("Address")
 
