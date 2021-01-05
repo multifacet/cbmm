@@ -292,50 +292,50 @@ kbadgerd_is_new_range(struct rb_root *root, struct vm_area_struct *vma) {
 	u64 min_end = vma->vm_end;
 
 	while (node) {
-	    range = container_of(node, struct kbadgerd_range, range_node);
+		range = container_of(node, struct kbadgerd_range, range_node);
 
-	    // If the range is the same or entirely in another range, continue
-	    if (max_start >= range->start && min_end <= range->end) {
-	        return NULL;
-	    }
-	    // If the start of the range is within an old range and the end is outside
-	    // of the old range, we may need to create a new range at the end of the old
-	    // range. This can happen if the VMA grows up from the end
-	    // If the range keeps growing, there can be multiple ranges between the VMA
-	    // start and end, so make sure to get the largest one
-	    if (max_start < range->end && min_end > range->end) {
-	        if (max_start < range->end) {
-	            max_start = range->end;
-		    node = root->rb_node;
-		    continue;
+		// If the range is the same or entirely in another range, continue
+		if (max_start >= range->start && min_end <= range->end) {
+			return NULL;
 		}
-	    }
-	    // Same as above, but for if the VMA grows down from the start
-	    if (max_start < range->start && min_end > range->start) {
-	        if (min_end > range->start) {
-	            min_end = range->start;
-		    node = root->rb_node;
-		    continue;
+		// If the start of the range is within an old range and the end is outside
+		// of the old range, we may need to create a new range at the end of the old
+		// range. This can happen if the VMA grows up from the end
+		// If the range keeps growing, there can be multiple ranges between the VMA
+		// start and end, so make sure to get the largest one
+		if (max_start < range->end && min_end > range->end) {
+			if (max_start < range->end) {
+				max_start = range->end;
+				node = root->rb_node;
+				continue;
+			}
 		}
-	    }
+		// Same as above, but for if the VMA grows down from the start
+		if (max_start < range->start && min_end > range->start) {
+			if (min_end > range->start) {
+				min_end = range->start;
+				node = root->rb_node;
+				continue;
+			}
+		}
 
-	    // Traverse the tree
-	    if (vma->vm_start < range->start)
-	        node = node->rb_left;
-	    else
-	        node = node->rb_right;
+		// Traverse the tree
+		if (vma->vm_start < range->start)
+			node = node->rb_left;
+		else
+			node = node->rb_right;
 	}
 
 	new_range =
-	    (struct kbadgerd_range *)vzalloc(sizeof(struct kbadgerd_range));
+		(struct kbadgerd_range *)vzalloc(sizeof(struct kbadgerd_range));
 
 	if (!new_range) {
-	    pr_err("kbadgerd: Unable to alloc new range! Skipping.");
-	    return NULL;
+		pr_err("kbadgerd: Unable to alloc new range! Skipping.");
+		return NULL;
 	}
 
-	    badger_trap_stats_init(&new_range->stats);
-	    badger_trap_stats_init(&new_range->totals);
+	badger_trap_stats_init(&new_range->stats);
+	badger_trap_stats_init(&new_range->totals);
 
 	new_range->start = max_start;
 	new_range->end = min_end;
@@ -350,11 +350,11 @@ static void check_for_new_vmas(void) {
 	down_read(&state.mm->mmap_sem);
 
 	for (vma = state.mm->mmap; vma; vma = vma->vm_next) {
-	    range = kbadgerd_is_new_range(&state.range, vma);
+		range = kbadgerd_is_new_range(&state.range, vma);
 
-	    if (range) {
-	        kbadgerd_range_insert(&state.data, &state.range, range);
-	    }
+		if (range) {
+			kbadgerd_range_insert(&state.data, &state.range, range);
+		}
 	}
 
 	up_read(&state.mm->mmap_sem);
