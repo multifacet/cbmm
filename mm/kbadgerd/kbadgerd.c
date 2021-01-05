@@ -63,6 +63,12 @@ struct kbadgerd_state {
 	struct task_struct *inspected_task;
 	struct mm_struct *mm;
 
+	/*
+	 * The data and range trees below should never have overlapping ranges,
+	 * but old_data may.
+	 * The data and range trees should have the same data except for
+	 * current_range, which is in range but not data.
+	 */
 	/* The data collected by inspection. */
 	struct rb_root_cached data;
 
@@ -70,9 +76,6 @@ struct kbadgerd_state {
 
 	/* List of the VMA ranges tracked to detect new ranges */
 	struct rb_root range;
-
-	/* The number of ranges in `data`. */
-	u64 num_ranges;
 
 	/* Current range. */
 	struct kbadgerd_range *current_range;
@@ -141,6 +144,10 @@ static int kbadgerd_range_cmp(
 		return 0;
 }
 
+// Inserts a new range into the data and range rb trees
+// If range_root == NULL, the range is not inserted into the range tree
+// If the range overlaps with an existing range, it will not be added to the
+// range tree.
 static void kbadgerd_range_insert(
 		struct rb_root_cached *data_root,
 		struct rb_root *range_root,
@@ -181,7 +188,9 @@ static void kbadgerd_range_insert(
 			container_of(*new, struct kbadgerd_range, range_node);
 
 		/* The ranges should not overlap*/
-		if (new_range->start == this->start || new_range->end == this->end) {
+		if ((new_range->start <= this->start && this->start < new_range->end)
+		    || (this->start <= new_range->start && new_range->start < this->end)) {
+		    	BUG();
 			return;
 		}
 
@@ -193,27 +202,7 @@ static void kbadgerd_range_insert(
 	}
 
 	rb_link_node(&new_range->range_node, parent, new);
-}
-
-static void kbadgerd_remove_from_range_rb_tree(
-		struct rb_root *root,
-		struct kbadgerd_range *range_to_remove)
-{
-	struct rb_node *node = root->rb_node;
-	struct kbadgerd_range *range;
-
-	while (node) {
-	    range = container_of(node, struct kbadgerd_range, range_node);
-
-	    if (range_to_remove->start < range->start) {
-	        node = node->rb_left;
-	    } else if (range_to_remove->start > range->start) {
-	        node = node->rb_right;
-	    } else {
-	        rb_erase(node, root);
-	        break;
-	    }
-	}
+	rb_insert_color(&new_range->range_node, range_root);
 }
 
 /* NOTE: max = first, so we can take advantage of rb_root_cached. */
@@ -267,6 +256,9 @@ static void print_data(struct kbadgerd_range *range) {
 
 static void print_all_data(void) {
 	struct kbadgerd_range *range;
+	// The range tree is used here because it is sorted by the start address
+	// This relies on the invariant that the data and range trees have the
+	// same ranges
 	struct rb_node *node = rb_first(&state.range);
 
 	pr_warn("kbadgerd: Results of inspection for pid=%d\n", state.pid);
@@ -296,14 +288,14 @@ kbadgerd_is_new_range(struct rb_root *root, struct vm_area_struct *vma) {
 	struct rb_node *node = root->rb_node;
 	struct kbadgerd_range *range;
 	struct kbadgerd_range *new_range;
-	u64 max_start = 0;
-	u64 min_end = 0;
+	u64 max_start = vma->vm_start;
+	u64 min_end = vma->vm_end;
 
 	while (node) {
 	    range = container_of(node, struct kbadgerd_range, range_node);
 
 	    // If the range is the same or entirely in another range, continue
-	    if (vma->vm_start >= range->start && vma->vm_end <= range->end) {
+	    if (max_start >= range->start && min_end <= range->end) {
 	        return NULL;
 	    }
 	    // If the start of the range is within an old range and the end is outside
@@ -311,14 +303,20 @@ kbadgerd_is_new_range(struct rb_root *root, struct vm_area_struct *vma) {
 	    // range. This can happen if the VMA grows up from the end
 	    // If the range keeps growing, there can be multiple ranges between the VMA
 	    // start and end, so make sure to get the largest one
-	    if (vma->vm_start < range->end && vma->vm_end > range->end) {
-	        if (max_start < range->end)
+	    if (max_start < range->end && min_end > range->end) {
+	        if (max_start < range->end) {
 	            max_start = range->end;
+		    node = root->rb_node;
+		    continue;
+		}
 	    }
 	    // Same as above, but for if the VMA grows down from the start
-	    if (vma->vm_start < range->start && vma->vm_end > range->start) {
-	        if (min_end > range->start)
+	    if (max_start < range->start && min_end > range->start) {
+	        if (min_end > range->start) {
 	            min_end = range->start;
+		    node = root->rb_node;
+		    continue;
+		}
 	    }
 
 	    // Traverse the tree
@@ -339,16 +337,8 @@ kbadgerd_is_new_range(struct rb_root *root, struct vm_area_struct *vma) {
 	    badger_trap_stats_init(&new_range->stats);
 	    badger_trap_stats_init(&new_range->totals);
 
-	if (max_start != 0) {
-	    new_range->start = max_start;
-	    new_range->end = vma->vm_end;
-	} else if (min_end != 0) {
-	    new_range->start = vma->vm_start;
-	    new_range->end = min_end;
-	} else {
-	    new_range->start = vma->vm_start;
-	    new_range->end = vma->vm_end;
-	}
+	new_range->start = max_start;
+	new_range->end = min_end;
 
 	return new_range;
 }
@@ -364,7 +354,6 @@ static void check_for_new_vmas(void) {
 
 	    if (range) {
 	        kbadgerd_range_insert(&state.data, &state.range, range);
-	        state.num_ranges += 1;
 	    }
 	}
 
@@ -405,7 +394,6 @@ static void start_inspection(void) {
 	state.old_data = RB_ROOT_CACHED;
 	state.range = RB_ROOT;
 
-	state.num_ranges = 0;
 	state.current_range = NULL;
 
 	for (i = 0, vma = state.mm->mmap; vma; vma = vma->vm_next) {
@@ -424,7 +412,6 @@ static void start_inspection(void) {
 		new_range->end = vma->vm_end;
 
 		kbadgerd_range_insert(&state.data, &state.range, new_range);
-		state.num_ranges += 1;
 
 		i += 1;
 
@@ -482,6 +469,8 @@ static void end_inspection(void) {
 		vfree(range);
 	}
 
+	state.range = RB_ROOT;
+
 	if (state.mm) {
 		mmdrop(state.mm);
 		state.mm = NULL;
@@ -506,7 +495,7 @@ static void process_and_insert_current_range(void) {
 	current_range->explored = true;
 
 	// Remove the range from the range rb tree because it might be split
-	kbadgerd_remove_from_range_rb_tree(&state.range, current_range);
+	rb_erase(&current_range->range_node, &state.range);
 
 	// If the size of the current range is smaller than the threshold, we
 	// don't try to break it down further. Just insert it back to the tree.
