@@ -360,7 +360,7 @@ void badger_trap_walk(struct mm_struct *mm, u64 lower, u64 upper, bool init)
 		mm->badger_trap_start = lower & HPAGE_PMD_MASK;
 		// Round up to hpage boundary, but subtract 1 to make it inclusive.
 		mm->badger_trap_end = ((upper - 1) & HPAGE_PMD_MASK) + HPAGE_PMD_SIZE - 1;
-		mm->badger_trap_enabled = init;
+		mm->badger_trap_enabled = true;
 		mm->badger_trap_was_enabled = true;
 		badger_trap_stats_clear(mm->bt_stats);
 	}
@@ -390,12 +390,7 @@ void badger_trap_walk(struct mm_struct *mm, u64 lower, u64 upper, bool init)
 	up_write(&mm->badger_trap_page_table_sem);
 
 	if (!init) {
-		mm->badger_trap_enabled = init;
-		// Round down to hpage boundary.
-		mm->badger_trap_start = lower & HPAGE_PMD_MASK;
-		// Round up to hpage boundary, but subtract 1 to make it inclusive.
-		mm->badger_trap_end = ((upper - 1) & HPAGE_PMD_MASK) + HPAGE_PMD_SIZE - 1;
-		badger_trap_stats_clear(mm->bt_stats);
+		mm->badger_trap_enabled = false;
 	}
 
 	up_write(&mm->mmap_sem);
