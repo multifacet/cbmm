@@ -43,6 +43,9 @@ struct kbadgerd_state {
 	/* The PID of the process to inspect. */
 	volatile pid_t pid;
 
+	/* The interval to sleep (in millisecs). */
+	volatile unsigned int sleep_interval;
+
 	/*
 	 * Is kbadgerd actively inspecting a process?
 	 *
@@ -494,8 +497,8 @@ static int kbadgerd_do_work(void *data)
 			start_inspection();
 		}
 
-		pr_warn_once("kbadgerd: Interval is %d ms.\n", KBADGERD_SLEEP_MS);
-		msleep(KBADGERD_SLEEP_MS);
+		pr_warn_once("kbadgerd: Interval is %d ms.\n", state.sleep_interval);
+		msleep(state.sleep_interval);
 	}
 
 	pr_warn("kbadgerd: exiting.\n");
@@ -551,8 +554,39 @@ static ssize_t enabled_store(struct kobject *kobj,
 static struct kobj_attribute enabled_attr =
 	__ATTR(enabled, 0644, enabled_show, enabled_store);
 
+static ssize_t sleep_interval_show(struct kobject *kobj,
+			    struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", state.sleep_interval);
+}
+
+static ssize_t sleep_interval_store(struct kobject *kobj,
+			     struct kobj_attribute *attr,
+			     const char *buf, size_t count)
+{
+	unsigned int interval;
+	int ret;
+
+	ret = kstrtouint(buf, 0, &interval);
+	if (ret != 0) {
+		return ret;
+	}
+	else if (interval == 0) {
+		state.sleep_interval = KBADGERD_SLEEP_MS;
+		return count;
+	}
+	else {
+		state.sleep_interval = interval;
+		return count;
+	}
+}
+static struct kobj_attribute sleep_interval_attr =
+	__ATTR(sleep_interval, 0644, sleep_interval_show,
+			sleep_interval_store);
+
 static struct attribute *kbadgerd_attr[] = {
 	&enabled_attr.attr,
+	&sleep_interval_attr.attr,
 	NULL,
 };
 
@@ -598,6 +632,7 @@ static int do_kbadgerd_init(void)
 
 	// Init state by clearing it.
 	memset(&state, 0, sizeof(state));
+	state.sleep_interval = KBADGERD_SLEEP_MS;
 
 	kbadgerd_should_stop = false;
 	kbadgerd_task = kthread_run(kbadgerd_do_work, NULL, "kbadgerd");
