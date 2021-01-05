@@ -58,6 +58,7 @@ struct kbadgerd_state {
 	 */
 	volatile bool active;
 	volatile bool pid_changed;
+	volatile bool current_range_removed;
 
 	/* The process and address space to inspect. */
 	struct task_struct *inspected_task;
@@ -343,6 +344,131 @@ kbadgerd_is_new_range(struct rb_root *root, struct vm_area_struct *vma) {
 	return new_range;
 }
 
+static struct kbadgerd_range *
+kbadgerd_has_holes(
+	struct rb_root_cached *data_root,
+	struct rb_root_cached *old_data_root,
+	struct rb_root *range_root,
+	struct vm_area_struct *vma)
+{
+	struct rb_node *node = range_root->rb_node;
+	struct rb_node **nodes_to_remove;
+	struct kbadgerd_range *range;
+	struct kbadgerd_range *first_range = NULL;
+	struct kbadgerd_range *last_range = NULL;
+	struct kbadgerd_range *new_range;
+	bool is_hole = false;
+	int num_ranges;
+	int i;
+
+	// First, find the first kbadgerd range in the vma. This is the first
+	// range whose end address is after the vma's start address
+	while (node) {
+		range = container_of(node, struct kbadgerd_range, range_node);
+
+		if (range->end > vma->vm_start && range->start < vma->vm_end) {
+			if (!first_range || range->start < first_range->start)
+				first_range = range;
+		}
+
+		if (vma->vm_start < range->start)
+			node = node->rb_left;
+		else if (vma->vm_start == range->start)
+			break;
+		else
+			node = node->rb_right;
+	}
+
+	if (!first_range)
+		return NULL;
+
+	// Find the last kbadgerd range in the vma. This is the last range
+	// whose start address is before the vma's end address
+	last_range = first_range;
+	num_ranges = 1;
+	node = rb_next(node);
+	while (node) {
+		range = container_of(node, struct kbadgerd_range, range_node);
+
+		if (range->start >= vma->vm_end)
+			break;
+
+		// If there's a gap between ranges within a vma, there's a hole
+		if (last_range->end != range->start)
+			is_hole = true;
+
+		last_range = range;
+
+		num_ranges++;
+		node = rb_next(node);
+	}
+
+	if (!is_hole) {
+		return NULL;
+	}
+
+	nodes_to_remove =
+		(struct rb_node**)vzalloc(sizeof(struct rb_node*) * num_ranges);
+
+	if (!nodes_to_remove) {
+		pr_err("kbadgerd: Unable to alloc array of old ranges.");
+		return NULL;
+	}
+
+	new_range =
+		(struct kbadgerd_range *)vzalloc(sizeof(struct kbadgerd_range));
+
+	if (!new_range) {
+		pr_err("kbadgerd: Unable to alloc new range! Skipping.");
+		return NULL;
+	}
+
+	// min of vma->vm_start and first_range->start
+	if (vma->vm_start < first_range->start)
+		new_range->start = vma->vm_start;
+	else
+		new_range->start = first_range->start;
+
+	// max of vma->vm_end and last_range->end
+	if (vma->vm_end > last_range->end)
+		new_range->end = vma->vm_end;
+	else
+		new_range->end = last_range->end;
+
+	node = &first_range->range_node;
+	for (i = 0; i < num_ranges; i++) {
+		if (!node) {
+			num_ranges = i;
+			break;
+		}
+
+		nodes_to_remove[i] = node;
+
+		node = rb_next(node);
+	}
+
+	// Put the old ranges inside the new range in the old data tree
+	for (i = 0; i < num_ranges; i++) {
+		range = container_of(nodes_to_remove[i], struct kbadgerd_range, range_node);
+
+		rb_erase(&range->range_node, range_root);
+		// If this range is current range, it has already been removed
+		// from the data tree.
+		if (range != state.current_range) {
+			rb_erase_cached(&range->data_node, data_root);
+		} else {
+			// This is needed to make sure this range isn't removed from the
+			// range tree twice
+			state.current_range_removed = true;
+			// This is needed to prevent spending more time on this range
+			state.iteration_time_left = 1;
+		}
+		kbadgerd_range_insert(old_data_root, NULL, range);
+	}
+
+	return new_range;
+}
+
 static void check_for_new_vmas(void) {
 	struct vm_area_struct *vma = NULL;
 	struct kbadgerd_range *range;
@@ -350,7 +476,11 @@ static void check_for_new_vmas(void) {
 	down_read(&state.mm->mmap_sem);
 
 	for (vma = state.mm->mmap; vma; vma = vma->vm_next) {
-		range = kbadgerd_is_new_range(&state.range, vma);
+		range = kbadgerd_has_holes(&state.data, &state.old_data,
+			&state.range, vma);
+
+		if (!range)
+			range = kbadgerd_is_new_range(&state.range, vma);
 
 		if (range) {
 			kbadgerd_range_insert(&state.data, &state.range, range);
@@ -424,6 +554,7 @@ static void start_inspection(void) {
 
 	// Start badger trap for the first range...
 	state.active = true;
+	state.current_range_removed = false;
 	state.current_range = kbadgerd_range_remove_max(&state.data);
 	if (!state.current_range) {
 		pr_err("kbadgerd: no range to act on.");
@@ -489,6 +620,12 @@ static void process_and_insert_current_range(void) {
 	struct kbadgerd_range *current_range = state.current_range;
 	struct kbadgerd_range *new_left_range, *new_right_range;
 	u64 midpoint;
+
+	if (state.current_range_removed) {
+		state.current_range = NULL;
+		state.current_range_removed = false;
+		return;
+	}
 
 	// Mark the current range as explored. This decreases its priority in
 	// the next scan should we choose not to split it.
