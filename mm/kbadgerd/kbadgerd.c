@@ -325,6 +325,9 @@ static void end_inspection(void) {
 				state.current_range->end - 1,
 				false);
 
+		badger_trap_add_stats(&state.current_range->totals,
+				&state.current_range->stats);
+
 		// Add it back to the tree for simplicity.
 		kbadgerd_range_insert(&state.data, state.current_range);
 		state.current_range = NULL;
