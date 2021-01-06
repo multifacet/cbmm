@@ -448,8 +448,9 @@ static void continue_inspection(void) {
 		return;
 	}
 
-	pr_warn("kbadgerd: continuing inspection of pid=%d, %lld iterations left\n",
-			state.pid, state.iteration_time_left);
+	if (state.iteration_time_left == 1 || (state.iteration_time_left % 100 == 0))
+		pr_warn("kbadgerd: continuing inspection of pid=%d, %lld iterations left\n",
+				state.pid, state.iteration_time_left);
 
 	BUG_ON(state.pid == 0 || !state.active);
 	BUG_ON(!state.current_range);
