@@ -420,28 +420,21 @@ kbadgerd_has_holes(
 
 	if (!new_range) {
 		pr_err("kbadgerd: Unable to alloc new range! Skipping.");
+		vfree(nodes_to_remove);
 		return NULL;
 	}
 
-	// min of vma->vm_start and first_range->start
-	if (vma->vm_start < first_range->start)
-		new_range->start = vma->vm_start;
-	else
-		new_range->start = first_range->start;
+	new_range->start = min((u64)vma->vm_start, first_range->start);
+	new_range->end = max((u64)vma->vm_end, last_range->end);
 
-	// max of vma->vm_end and last_range->end
-	if (vma->vm_end > last_range->end)
-		new_range->end = vma->vm_end;
-	else
-		new_range->end = last_range->end;
+	badger_trap_stats_init(&new_range->stats);
+	badger_trap_stats_init(&new_range->totals);
 
+	// We need to gather the nodes to remove here and actually remove them
+	// in a different loop because we need to avoid calling rb_erase when
+	// iterating with rb_next.
 	node = &first_range->range_node;
-	for (i = 0; i < num_ranges; i++) {
-		if (!node) {
-			num_ranges = i;
-			break;
-		}
-
+	for (i = 0; i < num_ranges && node; i++) {
 		nodes_to_remove[i] = node;
 
 		node = rb_next(node);
@@ -465,6 +458,8 @@ kbadgerd_has_holes(
 		}
 		kbadgerd_range_insert(old_data_root, NULL, range);
 	}
+
+	vfree(nodes_to_remove);
 
 	return new_range;
 }
