@@ -15,7 +15,7 @@
 #include <linux/sort.h>
 #include <linux/rbtree.h>
 
-#define KBADGERD_SLEEP_MS 500
+#define KBADGERD_SLEEP_MS 100
 #define KBADGERD_NEW_VMA_CHECK_RATE 4
 #define RANGE_SIZE_THRESHOLD HPAGE_PMD_SIZE
 
@@ -477,9 +477,8 @@ static void check_for_new_vmas(void) {
 		if (!range)
 			range = kbadgerd_is_new_range(&state.range, vma);
 
-		if (range) {
+		if (range)
 			kbadgerd_range_insert(&state.data, &state.range, range);
-		}
 	}
 
 	up_read(&state.mm->mmap_sem);
