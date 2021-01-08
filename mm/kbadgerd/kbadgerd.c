@@ -772,7 +772,7 @@ static int kbadgerd_do_work(void *data)
 
 		if (state.active) {
                         if (i % KBADGERD_NEW_VMA_CHECK_RATE == 0) {
-                            check_for_new_vmas();
+                            //check_for_new_vmas(); // TODO: uncomment
                         }
 			continue_inspection();
 		} else if (state.pid != 0) {
