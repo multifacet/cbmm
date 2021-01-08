@@ -723,12 +723,12 @@ void __noreturn do_exit(long code)
 	if(current->mm && current->mm->badger_trap_enabled)
 	{
 		// Each thread will print. We just need to take the last one.
-		spin_lock(&current->mm->bt_stats->lock);
+		//spin_lock(&current->mm->bt_stats->lock);
 		pr_warn("BadgerTrap: Task terminating. current=%p pid=%d tgid=%d mm=%p parent_pid=%d\n",
 				current, current->pid, current->tgid, current->mm,
 				current->real_parent->pid);
 		print_badger_trap_stats(current->mm);
-		spin_unlock(&current->mm->bt_stats->lock);
+		//spin_unlock(&current->mm->bt_stats->lock);
 	}
 
 	/* markm: doesn't seem to work properly if main thread exits not-last.

@@ -68,7 +68,7 @@ struct badger_trap_stats {
 	u64 total_dtlb_4kb_load_misses;
 	u64 total_dtlb_2mb_load_misses;
 
-	spinlock_t lock;
+	//spinlock_t lock;
 };
 
 static inline void badger_trap_stats_clear(struct badger_trap_stats *stats)
@@ -82,7 +82,7 @@ static inline void badger_trap_stats_clear(struct badger_trap_stats *stats)
 static inline void badger_trap_stats_init(struct badger_trap_stats *stats)
 {
 	badger_trap_stats_clear(stats);
-	spin_lock_init(&stats->lock);
+	//spin_lock_init(&stats->lock);
 }
 
 static inline void badger_trap_add_stats(
