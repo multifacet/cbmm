@@ -386,7 +386,7 @@ kbadgerd_has_holes(
 			node = node->rb_right;
 	}
 
-	if (!first_range)
+	if (!first_range || !node)
 		return NULL;
 
 	// Find the last kbadgerd range in the vma. This is the last range
