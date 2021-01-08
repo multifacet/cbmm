@@ -63,38 +63,37 @@ struct mm_rss_stat {
 };
 
 struct badger_trap_stats {
-	u64 total_dtlb_4kb_store_misses;
-	u64 total_dtlb_2mb_store_misses;
-	u64 total_dtlb_4kb_load_misses;
-	u64 total_dtlb_2mb_load_misses;
-
-	//spinlock_t lock;
+	atomic64_t total_dtlb_4kb_store_misses;
+	atomic64_t total_dtlb_2mb_store_misses;
+	atomic64_t total_dtlb_4kb_load_misses;
+	atomic64_t total_dtlb_2mb_load_misses;
 };
 
 static inline void badger_trap_stats_clear(struct badger_trap_stats *stats)
 {
-	stats->total_dtlb_4kb_store_misses = 0;
-	stats->total_dtlb_2mb_store_misses = 0;
-	stats->total_dtlb_4kb_load_misses  = 0;
-	stats->total_dtlb_2mb_load_misses  = 0;
+	atomic64_set_release(&stats->total_dtlb_4kb_store_misses, 0);
+	atomic64_set_release(&stats->total_dtlb_2mb_store_misses, 0);
+	atomic64_set_release(&stats->total_dtlb_4kb_load_misses,  0);
+	atomic64_set_release(&stats->total_dtlb_2mb_load_misses,  0);
 }
 
 static inline void badger_trap_stats_init(struct badger_trap_stats *stats)
 {
 	badger_trap_stats_clear(stats);
-	//spin_lock_init(&stats->lock);
 }
 
 static inline void badger_trap_add_stats(
 		struct badger_trap_stats *to,
 		const struct badger_trap_stats *from)
 {
-	//spin_lock(&to->lock);
-	to->total_dtlb_4kb_store_misses += from->total_dtlb_4kb_store_misses;
-	to->total_dtlb_2mb_store_misses += from->total_dtlb_2mb_store_misses;
-	to->total_dtlb_4kb_load_misses += from->total_dtlb_4kb_load_misses;
-	to->total_dtlb_2mb_load_misses += from->total_dtlb_2mb_load_misses;
-	//spin_unlock(&to->lock); // TODO uncomment
+	atomic64_add(atomic64_read_acquire(&from->total_dtlb_4kb_store_misses),
+			&to->total_dtlb_4kb_store_misses);
+	atomic64_add(atomic64_read_acquire(&from->total_dtlb_2mb_store_misses),
+			&to->total_dtlb_2mb_store_misses);
+	atomic64_add(atomic64_read_acquire(&from->total_dtlb_4kb_load_misses),
+			&to->total_dtlb_4kb_load_misses);
+	atomic64_add(atomic64_read_acquire(&from->total_dtlb_2mb_load_misses),
+			&to->total_dtlb_2mb_load_misses);
 }
 
 struct page_frag {

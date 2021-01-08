@@ -107,10 +107,10 @@ static struct kobject *kbadgerd_kobj = NULL;
 // investigate it, split it, and then insert the chunks.
 
 static u64 total_misses(const struct badger_trap_stats *stats) {
-	return stats->total_dtlb_2mb_load_misses
-		+ stats->total_dtlb_2mb_store_misses
-		+ stats->total_dtlb_4kb_load_misses
-		+ stats->total_dtlb_4kb_store_misses;
+	return atomic64_read(&stats->total_dtlb_2mb_load_misses)
+		+ atomic64_read(&stats->total_dtlb_2mb_store_misses)
+		+ atomic64_read(&stats->total_dtlb_4kb_load_misses)
+		+ atomic64_read(&stats->total_dtlb_4kb_store_misses);
 }
 
 /* Compares ranges by size/weight, not memory address. */
@@ -250,10 +250,14 @@ static void print_data(struct kbadgerd_range *range) {
 	pr_warn("kbadgerd: [%llx, %llx) (%lld bytes)", range->start, range->end,
 			range->end - range->start);
 	if (total_misses(&range->totals)) {
-		pr_warn("kbadgerd: \t4KB load misses: %lld", range->totals.total_dtlb_4kb_load_misses);
-		pr_warn("kbadgerd: \t4KB store misses: %lld", range->totals.total_dtlb_4kb_store_misses);
-		pr_warn("kbadgerd: \t2MB load misses: %lld", range->totals.total_dtlb_2mb_load_misses);
-		pr_warn("kbadgerd: \t2MB store misses: %lld\n", range->totals.total_dtlb_2mb_store_misses);
+		pr_warn("kbadgerd: \t4KB load misses: %lld",
+				atomic64_read_acquire(&range->totals.total_dtlb_4kb_load_misses));
+		pr_warn("kbadgerd: \t4KB store misses: %lld",
+				atomic64_read_acquire(&range->totals.total_dtlb_4kb_store_misses));
+		pr_warn("kbadgerd: \t2MB load misses: %lld",
+				atomic64_read_acquire(&range->totals.total_dtlb_2mb_load_misses));
+		pr_warn("kbadgerd: \t2MB store misses: %lld\n",
+				atomic64_read_acquire(&range->totals.total_dtlb_2mb_store_misses));
 	} else {
 		pr_warn("kbadgerd: \tNo misses\n");
 	}
@@ -772,7 +776,7 @@ static int kbadgerd_do_work(void *data)
 
 		if (state.active) {
                         if (i % KBADGERD_NEW_VMA_CHECK_RATE == 0) {
-                            //check_for_new_vmas(); // TODO: uncomment
+				check_for_new_vmas();
                         }
 			continue_inspection();
 		} else if (state.pid != 0) {

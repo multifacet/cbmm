@@ -4026,12 +4026,10 @@ static int hugetlb_fake_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 		return VM_FAULT_SIGBUS;
 
 	/* Here where we do all our analysis */
-	//spin_lock(&mm->bt_stats->lock);
 	if (flags & FAULT_FLAG_WRITE)
-	    mm->bt_stats->total_dtlb_2mb_store_misses++;
+	    atomic64_inc(&mm->bt_stats->total_dtlb_2mb_store_misses);
 	else
-	    mm->bt_stats->total_dtlb_2mb_load_misses++;
-	//spin_unlock(&mm->bt_stats->lock);
+	    atomic64_inc(&mm->bt_stats->total_dtlb_2mb_load_misses);
 
 	/*
 	if (vma) {

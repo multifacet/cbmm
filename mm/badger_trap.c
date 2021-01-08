@@ -410,13 +410,13 @@ void print_badger_trap_stats(const struct mm_struct *mm) {
 	pr_warn("BadgerTrap: Statistics for Process %s\n",
 			mm->owner ? mm->owner->comm : "<unknown process>");
 	pr_warn("BadgerTrap: DTLB load miss for 4KB page detected %llu\n",
-			mm->bt_stats->total_dtlb_4kb_load_misses);
+			atomic64_read_acquire(&mm->bt_stats->total_dtlb_4kb_load_misses));
 	pr_warn("BadgerTrap: DTLB load miss for 2MB page detected %llu\n",
-			mm->bt_stats->total_dtlb_2mb_load_misses);
+			atomic64_read_acquire(&mm->bt_stats->total_dtlb_2mb_load_misses));
 	pr_warn("BadgerTrap: DTLB store miss for 4KB page detected %llu\n",
-			mm->bt_stats->total_dtlb_4kb_store_misses);
+			atomic64_read_acquire(&mm->bt_stats->total_dtlb_4kb_store_misses));
 	pr_warn("BadgerTrap: DTLB store miss for 2MB page detected %llu\n",
-			mm->bt_stats->total_dtlb_2mb_store_misses);
+			atomic64_read_acquire(&mm->bt_stats->total_dtlb_2mb_store_misses));
 	/*
 	pr_warn("-----------------------------------\n");
 	for (vma = mm->mmap; vma; vma = vma->vm_next) {
