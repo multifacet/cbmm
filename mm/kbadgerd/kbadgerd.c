@@ -317,13 +317,13 @@ kbadgerd_is_new_range(struct rb_root *root, struct vm_area_struct *vma) {
 		// range. This can happen if the VMA grows up from the end.
 		// If the range keeps growing, there can be multiple ranges between the VMA
 		// start and end, so make sure to get the largest one.
-		if (max_start < range->end && min_end > range->end) {
+		if (max_start <= range->end && min_end > range->end) {
 			max_start = range->end;
 			node = root->rb_node;
 			continue;
 		}
 		// Same as above, but for if the VMA grows down from the start
-		if (max_start < range->start && min_end > range->start) {
+		if (max_start < range->start && min_end >= range->start) {
 			min_end = range->start;
 			node = root->rb_node;
 			continue;
