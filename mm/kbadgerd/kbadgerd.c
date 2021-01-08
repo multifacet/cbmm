@@ -299,15 +299,15 @@ kbadgerd_is_new_range(struct rb_root *root, struct vm_area_struct *vma) {
 	while (node) {
 		range = container_of(node, struct kbadgerd_range, range_node);
 
-		// If the range is the same or entirely in another range, continue
+		// If the vma is the same or entirely in another range, continue
 		if (max_start >= range->start && min_end <= range->end) {
 			return NULL;
 		}
 		// If the start of the range is within an old range and the end is outside
 		// of the old range, we may need to create a new range at the end of the old
-		// range. This can happen if the VMA grows up from the end
+		// range. This can happen if the VMA grows up from the end.
 		// If the range keeps growing, there can be multiple ranges between the VMA
-		// start and end, so make sure to get the largest one
+		// start and end, so make sure to get the largest one.
 		if (max_start < range->end && min_end > range->end) {
 			max_start = range->end;
 			node = root->rb_node;
