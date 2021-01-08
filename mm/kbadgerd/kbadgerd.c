@@ -191,6 +191,10 @@ static void kbadgerd_range_insert(
 		/* The ranges should not overlap*/
 		if ((new_range->start <= this->start && this->start < new_range->end)
 		    || (this->start <= new_range->start && new_range->start < this->end)) {
+			pr_err("kbadgerd: Attempted to insert overlapping range!\n");
+			pr_err("kbadgerd: old range=[%llx, %llx) new_range=[%llx, %llx)",
+					this->start, this->end,
+					new_range->start, new_range->end);
 		    	BUG();
 			return;
 		}
@@ -341,6 +345,9 @@ kbadgerd_is_new_range(struct rb_root *root, struct vm_area_struct *vma) {
 	new_range->start = max_start;
 	new_range->end = min_end;
 
+	pr_warn("kbadgerd: range extension detected. new_range=[%llx, %llx)\n",
+			new_range->start, new_range->end);
+
 	return new_range;
 }
 
@@ -424,6 +431,9 @@ kbadgerd_has_holes(
 		return NULL;
 	}
 
+	pr_warn("kbadgerd: detected new VMA that overlaps holes. vma=[%lx, %lx)\n",
+			vma->vm_start, vma->vm_end);
+
 	new_range->start = min((u64)vma->vm_start, first_range->start);
 	new_range->end = max((u64)vma->vm_end, last_range->end);
 
@@ -443,6 +453,9 @@ kbadgerd_has_holes(
 	// Put the old ranges inside the new range in the old data tree
 	for (i = 0; i < num_ranges; i++) {
 		range = container_of(nodes_to_remove[i], struct kbadgerd_range, range_node);
+
+		pr_warn("kbadgerd: VMA overlaps range=[%llx, %llx)\n",
+				range->start, range->end);
 
 		rb_erase(&range->range_node, range_root);
 		// If this range is current range, it has already been removed
