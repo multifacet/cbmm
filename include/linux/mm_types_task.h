@@ -89,12 +89,12 @@ static inline void badger_trap_add_stats(
 		struct badger_trap_stats *to,
 		const struct badger_trap_stats *from)
 {
-	spin_lock(&to->lock);
+	//spin_lock(&to->lock);
 	to->total_dtlb_4kb_store_misses += from->total_dtlb_4kb_store_misses;
 	to->total_dtlb_2mb_store_misses += from->total_dtlb_2mb_store_misses;
 	to->total_dtlb_4kb_load_misses += from->total_dtlb_4kb_load_misses;
 	to->total_dtlb_2mb_load_misses += from->total_dtlb_2mb_load_misses;
-	spin_unlock(&to->lock);
+	//spin_unlock(&to->lock);
 }
 
 struct page_frag {
