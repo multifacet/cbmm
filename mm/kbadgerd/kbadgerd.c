@@ -345,7 +345,8 @@ kbadgerd_is_new_range(struct rb_root *root, struct vm_area_struct *vma) {
 	new_range->start = max_start;
 	new_range->end = min_end;
 
-	pr_warn("kbadgerd: range extension detected. new_range=[%llx, %llx)\n",
+	pr_warn("kbadgerd: range extension detected. vma=[%lx, %lx) new_range=[%llx, %llx)\n",
+			vma->vm_start, vma->vm_end,
 			new_range->start, new_range->end);
 
 	return new_range;
