@@ -303,7 +303,7 @@ kbadgerd_is_new_range(struct rb_root *root, struct vm_area_struct *vma) {
 	while (node) {
 		range = container_of(node, struct kbadgerd_range, range_node);
 
-		// If the vma is the same or entirely in another range, continue
+		// If the vma is the same or entirely in another range, stop.
 		if (max_start >= range->start && min_end <= range->end) {
 			return NULL;
 		}
@@ -311,7 +311,7 @@ kbadgerd_is_new_range(struct rb_root *root, struct vm_area_struct *vma) {
 		// If the vma completely subsumes another range, shorten it to
 		// one side, and we'll get the other side in a future check.
 		if (max_start <= range->start && min_end >= range->end) {
-			max_start = range->start;
+			max_start = range->end;
 			node = root->rb_node;
 			continue;
 		}
@@ -321,20 +321,20 @@ kbadgerd_is_new_range(struct rb_root *root, struct vm_area_struct *vma) {
 		// range. This can happen if the VMA grows up from the end.
 		// If the range keeps growing, there can be multiple ranges between the VMA
 		// start and end, so make sure to get the largest one.
-		if (max_start <= range->end && min_end > range->end) {
+		if (max_start < range->end && min_end > range->end) {
 			max_start = range->end;
 			node = root->rb_node;
 			continue;
 		}
 		// Same as above, but for if the VMA grows down from the start
-		if (max_start < range->start && min_end >= range->start) {
+		if (max_start < range->start && min_end > range->start) {
 			min_end = range->start;
 			node = root->rb_node;
 			continue;
 		}
 
 		// Traverse the tree
-		if (vma->vm_start < range->start)
+		if (max_start < range->start)
 			node = node->rb_left;
 		else
 			node = node->rb_right;
