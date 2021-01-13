@@ -14,6 +14,7 @@
 #include <linux/mm.h>
 #include <linux/sort.h>
 #include <linux/rbtree.h>
+#include <linux/mm_econ.h>
 
 #define KBADGERD_SLEEP_MS 100
 #define KBADGERD_NEW_VMA_CHECK_RATE 4
@@ -77,6 +78,9 @@ struct kbadgerd_state {
 
 	/* List of the VMA ranges tracked to detect new ranges */
 	struct rb_root range;
+
+	/* Protects the three trees. */
+	spinlock_t lock;
 
 	/* Current range. */
 	struct kbadgerd_range *current_range;
@@ -769,6 +773,8 @@ static int kbadgerd_do_work(void *data)
         u32 i = 0;
 
 	while (!kbadgerd_should_stop) {
+		spin_lock(&state.lock);
+
 		if (state.active && state.pid_changed) {
 			pr_warn("kbadgerd: pid changed. Ending inspection.");
 			end_inspection();
@@ -783,6 +789,8 @@ static int kbadgerd_do_work(void *data)
 			start_inspection();
 		}
 
+		spin_unlock(&state.lock);
+
                 i++;
 		pr_warn_once("kbadgerd: Interval is %d ms.\n", state.sleep_interval);
 		msleep(state.sleep_interval);
@@ -790,10 +798,36 @@ static int kbadgerd_do_work(void *data)
 
 	pr_warn("kbadgerd: exiting.\n");
 
+	spin_lock(&state.lock);
 	end_inspection();
+	spin_unlock(&state.lock);
 
 	do_exit(0);
 	BUG(); // Should never get here.
+}
+
+/******************************************************************************/
+/* A mm_econ_tlb_miss_estimator_fn_t for use in mm_econ, of course! */
+
+// For now, we do something simple: we find out if we have any info on the
+// given range.  If so, we return (# misses in the range)/(# huge pages in the
+// range), effectively assuming that the range has uniformly distributed misses
+// across its pages.
+//
+// We check starting in state.data and then state.old_data.
+//
+// If we don't have any info, just return 0;
+static u64 tlb_miss_est_fn(const struct mm_action *action)
+{
+	u64 ret = 0;
+
+	spin_lock(&state.lock);
+
+	// TODO
+
+	spin_unlock(&state.lock);
+
+	return ret;
 }
 
 /******************************************************************************/
@@ -933,6 +967,8 @@ static int do_kbadgerd_init(void)
 	err = kbadgerd_init_sysfs(&kbadgerd_kobj);
 	if (err)
 		return err;
+
+	register_mm_econ_tlb_miss_estimator(tlb_miss_est_fn);
 
 	return 0;
 }

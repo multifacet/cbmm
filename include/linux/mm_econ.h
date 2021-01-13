@@ -27,6 +27,12 @@ struct mm_action {
     };
 };
 
+// A typedef for function pointers for tlb miss estimator functions to be used
+// in estimating the number of TLB misses caused by the given page.
+typedef u64 (*mm_econ_tlb_miss_estimator_fn_t)(const struct mm_action *);
+
+void register_mm_econ_tlb_miss_estimator(mm_econ_tlb_miss_estimator_fn_t f);
+
 // The cost of a particular action relative to the status quo.
 struct mm_cost_delta {
     //// Difference in the number of TLB misses.

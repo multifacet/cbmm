@@ -78,6 +78,18 @@ static u64 mm_econ_expected_duration = 0;
 // We need to know how many bits are masked off the end of the address.
 static u64 mm_econ_profile_region_bits = 0;
 
+// The TLB misses estimator, if any.
+static mm_econ_tlb_miss_estimator_fn_t tlb_miss_est_fn = NULL;
+
+void register_mm_econ_tlb_miss_estimator(
+        mm_econ_tlb_miss_estimator_fn_t f)
+{
+    BUG_ON(!f);
+    tlb_miss_est_fn = f;
+    pr_warn("mm: registered TLB miss estimator %p\n", f);
+}
+EXPORT_SYMBOL(register_mm_econ_tlb_miss_estimator);
+
 static bool
 have_free_huge_pages(void)
 {
@@ -96,7 +108,8 @@ have_free_huge_pages(void)
 }
 
 static u64
-compute_hpage_benefit(const struct mm_action *action)
+compute_hpage_benefit_from_profile(
+        const struct mm_action *action)
 {
     struct h_node *cur;
     u64 masked_addr = action->address
@@ -110,6 +123,15 @@ compute_hpage_benefit(const struct mm_action *action)
     }
 
     return 0;
+}
+
+static u64
+compute_hpage_benefit(const struct mm_action *action)
+{
+    if (tlb_miss_est_fn)
+        return tlb_miss_est_fn(action);
+    else
+        return compute_hpage_benefit_from_profile(action);
 }
 
 static void
