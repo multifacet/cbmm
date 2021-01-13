@@ -74,7 +74,8 @@ struct kbadgerd_state {
 	/* The data collected by inspection. */
 	struct rb_root_cached data;
 
-	struct rb_root_cached old_data;
+	/* List of old ranges, sorted by starting address. */
+	struct rb_root old_data;
 
 	/* List of the VMA ranges tracked to detect new ranges */
 	struct rb_root range;
@@ -184,7 +185,8 @@ static void kbadgerd_range_insert_by_weight(
 
 static void kbadgerd_range_insert_by_start(
 		struct rb_root *range_root,
-		struct kbadgerd_range *new_range)
+		struct kbadgerd_range *new_range,
+		bool allow_overlap)
 {
 	struct rb_node **new = &(range_root->rb_node), *parent = NULL;
 
@@ -193,8 +195,10 @@ static void kbadgerd_range_insert_by_start(
 			container_of(*new, struct kbadgerd_range, range_node);
 
 		/* The ranges should not overlap*/
-		if ((new_range->start <= this->start && this->start < new_range->end)
-		    || (this->start <= new_range->start && new_range->start < this->end)) {
+		if (!allow_overlap &&
+		    ((new_range->start <= this->start && this->start < new_range->end)
+		    || (this->start <= new_range->start && new_range->start < this->end)))
+		{
 			pr_err("kbadgerd: Attempted to insert overlapping range!\n");
 			pr_err("kbadgerd: old range=[%llx, %llx) new_range=[%llx, %llx)",
 					this->start, this->end,
@@ -284,10 +288,10 @@ static void print_all_data(void) {
 	}
 
 	pr_warn("kbadgerd: Discarded ranges for pid=%d\n", state.pid);
-	node = rb_first_cached(&state.old_data);
+	node = rb_first(&state.old_data);
 
 	while (node) {
-		range = container_of(node, struct kbadgerd_range, data_node);
+		range = container_of(node, struct kbadgerd_range, range_node);
 		print_data(range);
 
 		node = rb_next(node);
@@ -368,7 +372,7 @@ kbadgerd_is_new_range(struct rb_root *root, struct vm_area_struct *vma) {
 static struct kbadgerd_range *
 kbadgerd_has_holes(
 	struct rb_root_cached *data_root,
-	struct rb_root_cached *old_data_root,
+	struct rb_root *old_data_root,
 	struct rb_root *range_root,
 	struct vm_area_struct *vma)
 {
@@ -483,7 +487,7 @@ kbadgerd_has_holes(
 			// This is needed to prevent spending more time on this range
 			state.iteration_time_left = 1;
 		}
-		kbadgerd_range_insert_by_weight(old_data_root, range);
+		kbadgerd_range_insert_by_start(old_data_root, range, true);
 	}
 
 	vfree(nodes_to_remove);
@@ -506,7 +510,7 @@ static void check_for_new_vmas(void) {
 
 		if (range) {
 			kbadgerd_range_insert_by_weight(&state.data, range);
-			kbadgerd_range_insert_by_start(&state.range, range);
+			kbadgerd_range_insert_by_start(&state.range, range, false);
 		}
 	}
 
@@ -544,7 +548,7 @@ static void start_inspection(void) {
 	down_read(&state.mm->mmap_sem);
 
 	state.data = RB_ROOT_CACHED;
-	state.old_data = RB_ROOT_CACHED;
+	state.old_data = RB_ROOT;
 	state.range = RB_ROOT;
 
 	state.current_range = NULL;
@@ -565,7 +569,7 @@ static void start_inspection(void) {
 		new_range->end = vma->vm_end;
 
 		kbadgerd_range_insert_by_weight(&state.data, new_range);
-		kbadgerd_range_insert_by_start(&state.range, new_range);
+		kbadgerd_range_insert_by_start(&state.range, new_range, false);
 
 		i += 1;
 
@@ -594,6 +598,7 @@ static void start_inspection(void) {
 
 static void end_inspection(void) {
 	struct kbadgerd_range *range;
+	struct rb_node *node;
 
 	pr_warn("kbadgerd: Ending inspection.\n");
 
@@ -620,7 +625,10 @@ static void end_inspection(void) {
 	while ((range = kbadgerd_range_remove_max(&state.data))) { // NOTE: assignment
 		vfree(range);
 	}
-	while ((range = kbadgerd_range_remove_max(&state.old_data))) { // NOTE: assignment
+
+	while ((node = rb_first(&state.old_data))) { // NOTE: assignment
+		range = container_of(node, struct kbadgerd_range, range_node);
+		rb_erase(node, &state.old_data);
 		vfree(range);
 	}
 
@@ -662,14 +670,14 @@ static void process_and_insert_current_range(void) {
 	// don't try to break it down further. Just insert it back to the tree.
 	if (current_range->end - current_range->start <= RANGE_SIZE_THRESHOLD) {
 		kbadgerd_range_insert_by_weight(&state.data, current_range);
-		kbadgerd_range_insert_by_start(&state.range, current_range);
+		kbadgerd_range_insert_by_start(&state.range, current_range, false);
 		return;
 	}
 
 	// If the region took no hits, then don't bother looking at it much more...
 	if (total_misses(&current_range->stats) <= RANGE_IRRELEVANCE_THRESHOLD) {
 		kbadgerd_range_insert_by_weight(&state.data, current_range);
-		kbadgerd_range_insert_by_start(&state.range, current_range);
+		kbadgerd_range_insert_by_start(&state.range, current_range, false);
 		return;
 	}
 
@@ -682,7 +690,7 @@ static void process_and_insert_current_range(void) {
 	// large enough, this should never happen.
 	if (current_range->start == midpoint || current_range->end == midpoint) {
 		kbadgerd_range_insert_by_weight(&state.data, current_range);
-		kbadgerd_range_insert_by_start(&state.range, current_range);
+		kbadgerd_range_insert_by_start(&state.range, current_range, false);
 		return;
 	}
 
@@ -694,7 +702,7 @@ static void process_and_insert_current_range(void) {
 	if (!new_left_range) {
 		pr_err("kbadgerd: Unable to alloc new range! Reusing old.");
 		kbadgerd_range_insert_by_weight(&state.data, current_range);
-		kbadgerd_range_insert_by_start(&state.range, current_range);
+		kbadgerd_range_insert_by_start(&state.range, current_range, false);
 		return;
 	}
 
@@ -704,7 +712,7 @@ static void process_and_insert_current_range(void) {
 	if (!new_right_range) {
 		pr_err("kbadgerd: Unable to alloc new range! Reusing old.");
 		kbadgerd_range_insert_by_weight(&state.data, current_range);
-		kbadgerd_range_insert_by_start(&state.range, current_range);
+		kbadgerd_range_insert_by_start(&state.range, current_range, false);
 		vfree(new_left_range);
 		return;
 	}
@@ -725,12 +733,12 @@ static void process_and_insert_current_range(void) {
 	new_right_range->stats = current_range->stats;
 
 	kbadgerd_range_insert_by_weight(&state.data, new_left_range);
-	kbadgerd_range_insert_by_start(&state.range, new_left_range);
+	kbadgerd_range_insert_by_start(&state.range, new_left_range, false);
 	kbadgerd_range_insert_by_weight(&state.data, new_right_range);
-	kbadgerd_range_insert_by_start(&state.range, new_right_range);
+	kbadgerd_range_insert_by_start(&state.range, new_right_range, false);
 
 	state.current_range = NULL;
-	kbadgerd_range_insert_by_weight(&state.old_data, current_range);
+	kbadgerd_range_insert_by_start(&state.old_data, current_range, true);
 }
 
 static void continue_inspection(void) {
