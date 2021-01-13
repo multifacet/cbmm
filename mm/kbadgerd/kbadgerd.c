@@ -111,6 +111,15 @@ static struct kobject *kbadgerd_kobj = NULL;
 // relatively cheap insertion and deletion so we can remove the max,
 // investigate it, split it, and then insert the chunks.
 
+static bool addr_in_range(u64 addr, struct kbadgerd_range *range)
+{
+	if (addr < range->start)
+		return false;
+	if (addr >= range->end)
+		return false;
+	return true;
+}
+
 static u64 total_misses(const struct badger_trap_stats *stats) {
 	return atomic64_read(&stats->total_dtlb_2mb_load_misses)
 		+ atomic64_read(&stats->total_dtlb_2mb_store_misses)
@@ -210,12 +219,53 @@ static void kbadgerd_range_insert_by_start(
 		parent = *new;
 		if (new_range->start < this->start)
 			new = &((*new)->rb_left);
-		else
+		else if (new_range->start > this->start)
 			new = &((*new)->rb_right);
+		else
+			break;
 	}
 
 	rb_link_node(&new_range->range_node, parent, new);
 	rb_insert_color(&new_range->range_node, range_root);
+}
+
+/*
+ * Finds the smallest range in the tree that contains the given address and
+ * returns it; or returns NULL if none was found.
+ */
+static struct kbadgerd_range *
+kbadgerd_range_search_by_addr(
+	u64 addr,
+	struct rb_root *range_root,
+	bool allow_overlap)
+{
+	struct rb_node *node = rb_first(range_root);
+	struct kbadgerd_range *range, *best_range = NULL;
+
+	// Since there can be overlapping nodes in the tree, we need to start
+	// at the beginning and iterate until we are sure there can be no more
+	// matches.
+	while (node) {
+		range = container_of(node, struct kbadgerd_range, range_node);
+
+		// Have we reached the first range that is too high to contain
+		// our addr?
+		if (range->start > addr)
+			break;
+
+		// Try to find the smallest containing range.
+		if (addr_in_range(addr, range)
+			&& (!best_range
+			    || ((best_range->end - best_range->start) >
+				(range->end - range->start))))
+		{
+			best_range = range;
+		}
+
+		node = rb_next(node);
+	}
+
+	return best_range;
 }
 
 /* NOTE: max = first, so we can take advantage of rb_root_cached. */
@@ -838,10 +888,49 @@ static int kbadgerd_do_work(void *data)
 static u64 tlb_miss_est_fn(const struct mm_action *action)
 {
 	u64 ret = 0;
+	const u64 addr = action->address;
+	struct kbadgerd_range *range = NULL;
+
+	// Do a quick check before hand. This is racy, but will be true for all
+	// processes that are not being inspected, so we want it to be fast.
+	//
+	// If this check succeeds, then we grab the lock and try again.
+	if (current->pid != state.inspected_task->pid
+		|| !state.active
+		|| !state.current_range)
+	{
+		return 0;
+	}
 
 	spin_lock(&state.lock);
 
-	// TODO
+	if (current->pid != state.inspected_task->pid
+		|| !state.active
+		|| !state.current_range)
+	{
+		spin_unlock(&state.lock);
+		return 0;
+	}
+
+	// Check current range.
+	if (addr_in_range(addr, state.current_range))
+		range = state.current_range;
+
+	// Check range tree.
+	else {
+		range = kbadgerd_range_search_by_addr(addr, &state.range, false);
+	}
+
+	// Check old_data if we don't have enough info yet...
+	if (!range || total_misses(&range->totals) == 0) {
+		range = kbadgerd_range_search_by_addr(addr, &state.range, true);
+	}
+
+	// If we found a range, compute the number of misses per page and return.
+	if (range) {
+		ret = total_misses(&range->totals) /
+			((range->end - range->start) >> HPAGE_SHIFT);
+	}
 
 	spin_unlock(&state.lock);
 
