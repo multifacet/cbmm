@@ -153,9 +153,8 @@ static int kbadgerd_range_cmp(
 // If range_root == NULL, the range is not inserted into the range tree
 // If the range overlaps with an existing range, it will not be added to the
 // range tree.
-static void kbadgerd_range_insert(
+static void kbadgerd_range_insert_by_weight(
 		struct rb_root_cached *data_root,
-		struct rb_root *range_root,
 		struct kbadgerd_range *new_range)
 {
 	struct rb_node **new = &(data_root->rb_root.rb_node), *parent = NULL;
@@ -181,13 +180,14 @@ static void kbadgerd_range_insert(
 	/* Add new node and rebalance tree. */
 	rb_link_node(&new_range->data_node, parent, new);
 	rb_insert_color_cached(&new_range->data_node, data_root, is_leftmost);
+}
 
-	/* Figure out where to put the new node in the range rb tree */
-	if (!range_root)
-		return;
+static void kbadgerd_range_insert_by_start(
+		struct rb_root *range_root,
+		struct kbadgerd_range *new_range)
+{
+	struct rb_node **new = &(range_root->rb_node), *parent = NULL;
 
-	new = &(range_root->rb_node);
-	parent = NULL;
 	while (*new) {
 		struct kbadgerd_range *this =
 			container_of(*new, struct kbadgerd_range, range_node);
@@ -483,7 +483,7 @@ kbadgerd_has_holes(
 			// This is needed to prevent spending more time on this range
 			state.iteration_time_left = 1;
 		}
-		kbadgerd_range_insert(old_data_root, NULL, range);
+		kbadgerd_range_insert_by_weight(old_data_root, range);
 	}
 
 	vfree(nodes_to_remove);
@@ -504,8 +504,10 @@ static void check_for_new_vmas(void) {
 		if (!range)
 			range = kbadgerd_is_new_range(&state.range, vma);
 
-		if (range)
-			kbadgerd_range_insert(&state.data, &state.range, range);
+		if (range) {
+			kbadgerd_range_insert_by_weight(&state.data, range);
+			kbadgerd_range_insert_by_start(&state.range, range);
+		}
 	}
 
 	up_read(&state.mm->mmap_sem);
@@ -562,7 +564,8 @@ static void start_inspection(void) {
 		new_range->start = vma->vm_start;
 		new_range->end = vma->vm_end;
 
-		kbadgerd_range_insert(&state.data, &state.range, new_range);
+		kbadgerd_range_insert_by_weight(&state.data, new_range);
+		kbadgerd_range_insert_by_start(&state.range, new_range);
 
 		i += 1;
 
@@ -605,7 +608,7 @@ static void end_inspection(void) {
 				&state.current_range->stats);
 
 		// Add it back to the tree for simplicity.
-		kbadgerd_range_insert(&state.data, NULL, state.current_range);
+		kbadgerd_range_insert_by_weight(&state.data, state.current_range);
 		state.current_range = NULL;
 		badger_trap_set_stats_loc(state.mm, NULL);
 	}
@@ -658,13 +661,15 @@ static void process_and_insert_current_range(void) {
 	// If the size of the current range is smaller than the threshold, we
 	// don't try to break it down further. Just insert it back to the tree.
 	if (current_range->end - current_range->start <= RANGE_SIZE_THRESHOLD) {
-		kbadgerd_range_insert(&state.data, &state.range, current_range);
+		kbadgerd_range_insert_by_weight(&state.data, current_range);
+		kbadgerd_range_insert_by_start(&state.range, current_range);
 		return;
 	}
 
 	// If the region took no hits, then don't bother looking at it much more...
 	if (total_misses(&current_range->stats) <= RANGE_IRRELEVANCE_THRESHOLD) {
-		kbadgerd_range_insert(&state.data, &state.range, current_range);
+		kbadgerd_range_insert_by_weight(&state.data, current_range);
+		kbadgerd_range_insert_by_start(&state.range, current_range);
 		return;
 	}
 
@@ -676,7 +681,8 @@ static void process_and_insert_current_range(void) {
 	// Range is too small to split further. If RANGE_SIZE_THRESHOLD is
 	// large enough, this should never happen.
 	if (current_range->start == midpoint || current_range->end == midpoint) {
-		kbadgerd_range_insert(&state.data, &state.range, current_range);
+		kbadgerd_range_insert_by_weight(&state.data, current_range);
+		kbadgerd_range_insert_by_start(&state.range, current_range);
 		return;
 	}
 
@@ -687,7 +693,8 @@ static void process_and_insert_current_range(void) {
 
 	if (!new_left_range) {
 		pr_err("kbadgerd: Unable to alloc new range! Reusing old.");
-		kbadgerd_range_insert(&state.data, &state.range, current_range);
+		kbadgerd_range_insert_by_weight(&state.data, current_range);
+		kbadgerd_range_insert_by_start(&state.range, current_range);
 		return;
 	}
 
@@ -696,7 +703,8 @@ static void process_and_insert_current_range(void) {
 
 	if (!new_right_range) {
 		pr_err("kbadgerd: Unable to alloc new range! Reusing old.");
-		kbadgerd_range_insert(&state.data, &state.range, current_range);
+		kbadgerd_range_insert_by_weight(&state.data, current_range);
+		kbadgerd_range_insert_by_start(&state.range, current_range);
 		vfree(new_left_range);
 		return;
 	}
@@ -716,11 +724,13 @@ static void process_and_insert_current_range(void) {
 	new_right_range->end = current_range->end;
 	new_right_range->stats = current_range->stats;
 
-	kbadgerd_range_insert(&state.data, &state.range, new_left_range);
-	kbadgerd_range_insert(&state.data, &state.range, new_right_range);
+	kbadgerd_range_insert_by_weight(&state.data, new_left_range);
+	kbadgerd_range_insert_by_start(&state.range, new_left_range);
+	kbadgerd_range_insert_by_weight(&state.data, new_right_range);
+	kbadgerd_range_insert_by_start(&state.range, new_right_range);
 
 	state.current_range = NULL;
-	kbadgerd_range_insert(&state.old_data, NULL, current_range);
+	kbadgerd_range_insert_by_weight(&state.old_data, current_range);
 }
 
 static void continue_inspection(void) {
