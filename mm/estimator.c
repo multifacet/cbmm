@@ -128,6 +128,30 @@ profile_free_all(void)
     }
 }
 
+static void
+print_profile(void)
+{
+    struct rb_node *node = rb_first(&preloaded_profile);
+
+    // We may not be able to write everything to the buffer. So we print
+    // everything to printk instead.
+
+    pr_warn("mm_econ: profile...");
+
+    while (node) {
+        struct profile_range *range =
+            container_of(node, struct profile_range, node);
+        pr_warn("mm_econ: [%llu, %llu) (%llu bytes) misses=%llu\n",
+                range->start, range->end,
+                (range->end - range->start),
+                range->misses);
+
+        node = rb_next(node);
+    }
+
+    pr_warn("mm_econ: END profile...");
+}
+
 static bool
 have_free_huge_pages(void)
 {
@@ -289,26 +313,7 @@ static ssize_t preloaded_profile_show(struct kobject *kobj,
         struct kobj_attribute *attr, char *buf)
 {
     ssize_t count = sprintf(buf, "\n");
-    struct rb_node *node = rb_first(&preloaded_profile);
-
-    // We may not be able to write everything to the buffer. So we print
-    // everything to printk instead.
-
-    pr_warn("mm_econ: profile...");
-
-    while (node) {
-        struct profile_range *range =
-            container_of(node, struct profile_range, node);
-        pr_warn("mm_econ: [%llu, %llu) (%llu bytes) misses=%llu\n",
-                range->start, range->end,
-                (range->end - range->start),
-                range->misses);
-
-        node = rb_next(node);
-    }
-
-    pr_warn("mm_econ: END profile...");
-
+    print_profile();
     return count;
 }
 
@@ -389,6 +394,9 @@ static ssize_t preloaded_profile_store(struct kobject *kobj,
 
         profile_range_insert(range);
     }
+
+    pr_warn("mm_econ: profile set.");
+    print_profile();
 
     return count;
 
