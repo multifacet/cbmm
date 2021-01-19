@@ -399,7 +399,7 @@ err:
     return error;
 }
 static struct kobj_attribute preloaded_profile_attr =
-__ATTR(enabled, 0644, preloaded_profile_show, preloaded_profile_store);
+__ATTR(preloaded_profile, 0644, preloaded_profile_show, preloaded_profile_store);
 
 static struct attribute *mm_econ_attr[] = {
     &enabled_attr.attr,
