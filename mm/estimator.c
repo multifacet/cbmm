@@ -221,8 +221,10 @@ mm_estimate_huge_page_promote_cost_benefit(
     // Compute total cost.
     cost->cost = alloc_cost + prep_cost;
 
+#define TLB_MISS_COST 50 //cycles
+
     // Estimate benefit.
-    cost->benefit = compute_hpage_benefit(action);
+    cost->benefit = TLB_MISS_COST * compute_hpage_benefit(action);
 }
 
 // Estimates the change in the given metrics under the given action. Updates
