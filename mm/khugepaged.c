@@ -1124,6 +1124,9 @@ static int khugepaged_scan_pmd(struct mm_struct *mm,
 	spinlock_t *ptl;
 	int node = NUMA_NO_NODE, unmapped = 0;
 	bool writable = false;
+	struct mm_cost_delta mm_cost_delta;
+	struct mm_action mm_action;
+	bool should_do;
 
 	VM_BUG_ON(address & ~HPAGE_PMD_MASK);
 
@@ -1226,9 +1229,21 @@ static int khugepaged_scan_pmd(struct mm_struct *mm,
 out_unmap:
 	pte_unmap_unlock(pte, ptl);
 	if (ret) {
-		node = khugepaged_find_target_node();
-		/* collapse_huge_page will return with the mmap_sem released */
-		collapse_huge_page(mm, address, hpage, node, referenced, /* force */ false);
+		// (markm) run the estimator to check if we should create a 2MB page.
+		mm_action.address = address;
+		mm_action.action = MM_ACTION_PROMOTE_HUGE;
+		mm_action.huge_page_order = HPAGE_PMD_ORDER;
+		mm_estimate_changes(&mm_action, &mm_cost_delta);
+		should_do = mm_decide(&mm_cost_delta);
+
+		if (should_do) {
+			node = khugepaged_find_target_node();
+			/* collapse_huge_page will return with the mmap_sem released */
+			collapse_huge_page(mm, address, hpage, node, referenced,
+					/* force */ false);
+		} else {
+			ret = SCAN_MM_ECON_CANCEL;
+		}
 	}
 out:
 	trace_mm_khugepaged_scan_pmd(mm, page, writable, referenced,
