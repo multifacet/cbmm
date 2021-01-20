@@ -953,6 +953,7 @@ static int collapse_huge_page(struct mm_struct *mm,
 	 * sync compaction, and we do not need to hold the mmap_sem during
 	 * that. We will recheck the vma after taking it again in write mode.
 	 */
+	up_read(&mm->badger_trap_page_table_sem);
 	up_read(&mm->mmap_sem);
 	new_page = khugepaged_alloc_page(hpage, gfp, node);
 	if (!new_page) {
@@ -975,10 +976,13 @@ static int collapse_huge_page(struct mm_struct *mm,
 
 	pr_info("promoting: vma=%p", vma);
 
+	down_read(&mm->badger_trap_page_table_sem);
+
 	pmd = mm_find_pmd(mm, address);
 	if (!pmd) {
 		result = SCAN_PMD_NULL;
 		mem_cgroup_cancel_charge(new_page, memcg, true);
+		up_read(&mm->badger_trap_page_table_sem);
 		up_read(&mm->mmap_sem);
 		goto out_nolock;
 	}
@@ -990,10 +994,12 @@ static int collapse_huge_page(struct mm_struct *mm,
 	 */
 	if (!__collapse_huge_page_swapin(mm, vma, address, pmd, referenced, force)) {
 		mem_cgroup_cancel_charge(new_page, memcg, true);
+		up_read(&mm->badger_trap_page_table_sem);
 		up_read(&mm->mmap_sem);
 		goto out_nolock;
 	}
 
+	up_read(&mm->badger_trap_page_table_sem);
 	up_read(&mm->mmap_sem);
 	/*
 	 * Prevent all access to pagetables with the exception of
@@ -1001,6 +1007,7 @@ static int collapse_huge_page(struct mm_struct *mm,
 	 * handled by the anon_vma lock + PG_lock.
 	 */
 	down_write(&mm->mmap_sem);
+	down_read(&mm->badger_trap_page_table_sem);
 	result = SCAN_ANY_PROCESS;
 	if (!mmget_still_valid(mm))
 		goto out;
@@ -1101,6 +1108,7 @@ static int collapse_huge_page(struct mm_struct *mm,
 	khugepaged_pages_collapsed++;
 	result = SCAN_SUCCEED;
 out_up_write:
+	up_read(&mm->badger_trap_page_table_sem);
 	up_write(&mm->mmap_sem);
 out_nolock:
 	trace_mm_collapse_huge_page(mm, isolated, result);

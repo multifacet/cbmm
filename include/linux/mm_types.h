@@ -544,6 +544,15 @@ struct mm_struct {
 		// somewhere else, this pointer will point at bt_stats_inner.
 		struct badger_trap_stats *bt_stats;
 		struct badger_trap_stats bt_stats_inner;
+		// This semaphore acts as a read/write lock on the page tables.
+		// To simplify things (a lot!), we simply preclude concurrent
+		// changes to the page tables while badgertrap is walking page
+		// tables. We do this by grabbing this lock in exclusive mode
+		// in badgertrap, but grabbing it in shared mode everywhere
+		// else that page tables are modified. This allows other kernel
+		// functions to procede concurrently with each other, as in the
+		// normal linux kernel, but not concurrently with badgertrap.
+		//
 		// Ordering: grab mmap_sem before this one.
 		struct rw_semaphore badger_trap_page_table_sem;
 	} __randomize_layout;
