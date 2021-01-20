@@ -1250,6 +1250,8 @@ out_unmap:
 			collapse_huge_page(mm, address, hpage, node, referenced,
 					/* force */ false);
 		} else {
+			up_read(&mm->badger_trap_page_table_sem);
+			up_read(&mm->mmap_sem);
 			ret = SCAN_MM_ECON_CANCEL;
 		}
 	}
@@ -1283,8 +1285,6 @@ promote_to_huge(struct mm_struct *mm,
 
 	node = khugepaged_find_target_node();
 	result = collapse_huge_page(mm, address, &hpage, node, 512, /* force */ true);
-
-	up_read(&mm->badger_trap_page_table_sem);
 
 	if (IS_ERR_OR_NULL(hpage)) {
 		pr_warn("hpage is null or error");
