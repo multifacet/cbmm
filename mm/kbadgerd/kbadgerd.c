@@ -163,7 +163,7 @@ static int kbadgerd_range_cmp(
 // If range_root == NULL, the range is not inserted into the range tree
 // If the range overlaps with an existing range, it will not be added to the
 // range tree.
-static void kbadgerd_range_insert_by_weight(
+static noinline void kbadgerd_range_insert_by_weight(
 		struct rb_root_cached *data_root,
 		struct kbadgerd_range *new_range)
 {
@@ -192,7 +192,7 @@ static void kbadgerd_range_insert_by_weight(
 	rb_insert_color_cached(&new_range->data_node, data_root, is_leftmost);
 }
 
-static void kbadgerd_range_insert_by_start(
+static noinline void kbadgerd_range_insert_by_start(
 		struct rb_root *range_root,
 		struct kbadgerd_range *new_range,
 		bool allow_overlap)
@@ -231,7 +231,7 @@ static void kbadgerd_range_insert_by_start(
  * Finds the smallest range in the tree that contains the given address and
  * returns it; or returns NULL if none was found.
  */
-static struct kbadgerd_range *
+static noinline struct kbadgerd_range *
 kbadgerd_range_search_by_addr(
 	u64 addr,
 	struct rb_root *range_root,
@@ -543,7 +543,7 @@ kbadgerd_has_holes(
 	return new_range;
 }
 
-static void check_for_new_vmas(void) {
+static noinline void check_for_new_vmas(void) {
 	struct vm_area_struct *vma = NULL;
 	struct kbadgerd_range *range;
 
@@ -565,7 +565,7 @@ static void check_for_new_vmas(void) {
 	up_read(&state.mm->mmap_sem);
 }
 
-static void start_inspection(void) {
+static noinline void start_inspection(void) {
 	struct task_struct *target_task;
 	struct vm_area_struct *vma = NULL;
 	int i;
@@ -644,7 +644,7 @@ static void start_inspection(void) {
 	return;
 }
 
-static void end_inspection(void) {
+static noinline void end_inspection(void) {
 	struct kbadgerd_range *range;
 	struct rb_node *node;
 
@@ -696,7 +696,7 @@ static void end_inspection(void) {
 	state.pid = 0;
 }
 
-static void process_and_insert_current_range(void) {
+static noinline void process_and_insert_current_range(void) {
 	struct kbadgerd_range *current_range = state.current_range;
 	struct kbadgerd_range *new_left_range, *new_right_range;
 	u64 midpoint;
@@ -789,7 +789,7 @@ static void process_and_insert_current_range(void) {
 	kbadgerd_range_insert_by_start(&state.old_data, current_range, true);
 }
 
-static void continue_inspection(void) {
+static noinline void continue_inspection(void) {
 	struct kbadgerd_range *range;
 
 	if (state.inspected_task->flags & (PF_EXITING | PF_SIGNALED)) {
