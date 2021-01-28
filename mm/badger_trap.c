@@ -113,7 +113,7 @@ bool is_badger_trap_process(const char* proc_name)
 			return true;
 		}
 	}
-	pr_info("NOT Badger Trap process (%s).", proc_name);
+	//pr_info("NOT Badger Trap process (%s).", proc_name);
 	return false;
 }
 

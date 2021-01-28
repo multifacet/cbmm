@@ -1380,8 +1380,8 @@ void setup_new_exec(struct linux_binprm * bprm)
 		huge_addr_pid = current->pid;
 		pr_warn("Setting new huge_addr_pid=%d\n", huge_addr_pid);
 	} else {
-		pr_info("NOT huge_addr process (%s) huge_addr_comm=%s.\n",
-				current->comm, huge_addr_comm);
+		//pr_info("NOT huge_addr process (%s) huge_addr_comm=%s.\n",
+		//		current->comm, huge_addr_comm);
 	}
 
 	/* Check if we need to enable badger trap for this process*/
