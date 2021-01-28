@@ -227,6 +227,26 @@ mm_estimate_huge_page_promote_cost_benefit(
     cost->benefit = TLB_MISS_COST * compute_hpage_benefit(action);
 }
 
+// Update the given cost/benefit to also account for reclamation of a huge
+// page. This assumes that there is already a cost/benefit in `cost`.
+void
+mm_estimate_huge_page_reclaim_cost(
+       const struct mm_action *action, struct mm_cost_delta *cost)
+{
+    // TODO(markm): for now just assume it is very expensive. We might want to
+    // do something more clever later. For example, we can look at the amount
+    // of fragmentation or the amount of free memory. If we are heavily
+    // fragmented and under memory pressure, then reclaim will be expensive.
+    const u64 reclaim_cost = 1000000000; // ~hundreds of ms
+
+    cost->cost += reclaim_cost;
+}
+
+bool mm_econ_is_on(void)
+{
+    return mm_econ_mode > 0;
+}
+
 // Estimates the change in the given metrics under the given action. Updates
 // the given cost struct in place.
 //
@@ -255,6 +275,13 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
             // TODO(markm)
             cost->cost = 0;
             cost->benefit = 0;
+            return;
+
+        case MM_ACTION_ALLOC_RECLAIM:
+            // Estimate the cost/benefit of the promotion itself.
+            mm_estimate_huge_page_promote_cost_benefit(action, cost);
+            // Update the cost if we also need to do reclaim.
+            mm_estimate_huge_page_reclaim_cost(action, cost);
             return;
 
         default:

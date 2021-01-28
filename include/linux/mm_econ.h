@@ -7,6 +7,7 @@
 #define MM_ACTION_PROMOTE_HUGE  (1 <<  0)
 #define MM_ACTION_DEMOTE_HUGE   (1 <<  1)
 #define MM_ACTION_RUN_DEFRAG    (1 <<  2)
+#define MM_ACTION_ALLOC_RECLAIM (1 <<  3)
 
 // An action that may be taken by the memory management subsystem.
 struct mm_action {
@@ -50,6 +51,8 @@ struct mm_cost_delta {
     // Total estimated benefit in cycles.
     u64 benefit;
 };
+
+bool mm_econ_is_on(void);
 
 bool mm_decide(const struct mm_cost_delta *cost);
 

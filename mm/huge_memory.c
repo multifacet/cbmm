@@ -36,6 +36,7 @@
 #include <linux/mm_stats.h>
 #include <linux/rbtree.h>
 #include <linux/badger_trap.h>
+#include <linux/mm_econ.h>
 
 #include <asm/tlb.h>
 #include <asm/pgalloc.h>
@@ -1146,9 +1147,32 @@ release:
  *	    available
  * never: never stall for any thp allocation
  */
-static inline gfp_t alloc_hugepage_direct_gfpmask(struct vm_area_struct *vma)
+static inline gfp_t alloc_hugepage_direct_gfpmask(
+		struct vm_area_struct *vma,
+		unsigned long haddr)
 {
 	const bool vma_madvised = !!(vma->vm_flags & VM_HUGEPAGE);
+
+	if (mm_econ_is_on()) {
+		struct mm_cost_delta mm_cost_delta;
+		struct mm_action mm_action;
+		bool should_do;
+
+		mm_action.address = haddr;
+		mm_action.action = MM_ACTION_ALLOC_RECLAIM;
+		mm_action.huge_page_order = HPAGE_PUD_SHIFT-PAGE_SHIFT;
+		mm_estimate_changes(&mm_action, &mm_cost_delta);
+		should_do = mm_decide(&mm_cost_delta);
+
+		// TODO: Also eval if __GFP_KSWAPD_RECLAIM is worth it...
+		// perhaps if value of THP is high but cost of direct reclaim
+		// is too high.
+		if (should_do) {
+			return GFP_TRANSHUGE_LIGHT | __GFP_DIRECT_RECLAIM;
+		} else {
+			return GFP_TRANSHUGE_LIGHT;
+		}
+	}
 
 	/* Always do synchronous compaction */
 	if (test_bit(TRANSPARENT_HUGEPAGE_DEFRAG_DIRECT_FLAG, &transparent_hugepage_flags))
@@ -1253,7 +1277,7 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf)
 				rdtsc() - start);
 		return ret;
 	}
-	gfp = alloc_hugepage_direct_gfpmask(vma);
+	gfp = alloc_hugepage_direct_gfpmask(vma, haddr);
 	page = alloc_hugepage_vma(gfp, vma, haddr, HPAGE_PMD_ORDER);
 	if (unlikely(!page)) {
 		count_vm_event(THP_FAULT_FALLBACK);
@@ -1876,7 +1900,7 @@ vm_fault_t do_huge_pmd_wp_page(struct vm_fault *vmf, pmd_t orig_pmd)
 alloc:
 	if (__transparent_hugepage_enabled(vma, vmf->address) &&
 	    !transparent_hugepage_debug_cow()) {
-		huge_gfp = alloc_hugepage_direct_gfpmask(vma);
+		huge_gfp = alloc_hugepage_direct_gfpmask(vma, haddr);
 		new_page = alloc_hugepage_vma(huge_gfp, vma, haddr, HPAGE_PMD_ORDER);
 	} else
 		new_page = NULL;
