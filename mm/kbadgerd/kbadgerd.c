@@ -219,10 +219,8 @@ static void kbadgerd_range_insert_by_start(
 		parent = *new;
 		if (new_range->start < this->start)
 			new = &((*new)->rb_left);
-		else if (new_range->start > this->start)
-			new = &((*new)->rb_right);
 		else
-			break;
+			new = &((*new)->rb_right);
 	}
 
 	rb_link_node(&new_range->range_node, parent, new);
