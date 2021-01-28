@@ -895,11 +895,19 @@ static bool __collapse_huge_page_swapin(struct mm_struct *mm,
 		if (!is_swap_pte(vmf.orig_pte))
 			continue;
 		swapped_in++;
+
+		// NOTE(markm): releasing here technically allows a race
+		// between bt and do_swap_page, but do_swap_page is a huge
+		// rat's nest that I don't want to crawl through and handle
+		// properly.
+		up_read(&mm->badger_trap_page_table_sem);
+
 		ret = do_swap_page(&vmf);
 
 		/* do_swap_page returns VM_FAULT_RETRY with released mmap_sem */
 		if (ret & VM_FAULT_RETRY) {
 			down_read(&mm->mmap_sem);
+			down_read(&mm->badger_trap_page_table_sem);
 			if (hugepage_vma_revalidate(mm, address, &vmf.vma, force)) {
 				/* vma is no longer available, don't continue to swapin */
 				trace_mm_collapse_huge_page_swapin(mm, swapped_in, referenced, 0);
@@ -2062,6 +2070,7 @@ skip:
 				khugepaged_scan_file(mm, file, pgoff, hpage);
 				fput(file);
 			} else {
+				down_read(&mm->badger_trap_page_table_sem);
 				ret = khugepaged_scan_pmd(mm, vma,
 						khugepaged_scan.address,
 						hpage);
