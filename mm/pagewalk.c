@@ -50,17 +50,10 @@ again:
 		 * This implies that each ->pmd_entry() handler
 		 * needs to know about pmd_trans_huge() pmds
 		 */
-		if (ops->pmd_entry) {
-			spinlock_t *ptl = pmd_trans_huge_lock(pmd, walk->vma);
-
-			if (ptl) {
-				err = ops->pmd_entry(pmd, addr, next, walk);
-				spin_unlock(ptl);
-				if (err)
-					break;
-				continue;
-			}
-		}
+		if (ops->pmd_entry)
+			err = ops->pmd_entry(pmd, addr, next, walk);
+		if (err)
+			break;
 
 		/*
 		 * Check this here so we only break down trans_huge
