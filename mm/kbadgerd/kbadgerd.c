@@ -37,6 +37,15 @@ struct kbadgerd_range {
 	// Has the range ever been explored?
 	bool explored;
 
+
+	// The number of times this range has been sampled (excluding any
+	// currently running sampling).
+	u64 nsamples;
+
+	// The results of the samples. `stats` is only the most recent/current
+	// sample, while `totals` is the sum of all samples so far.
+	//
+	// `stats`, not `totals` is used for prioritizing the next region to sample.
 	struct badger_trap_stats stats;
 	struct badger_trap_stats totals;
 };
@@ -303,17 +312,27 @@ static void start_badger_trap(struct kbadgerd_range *range) {
 }
 
 static void print_data(struct kbadgerd_range *range) {
+	u64 ld_4k = atomic64_read_acquire(&range->totals.total_dtlb_4kb_load_misses),
+	    st_4k = atomic64_read_acquire(&range->totals.total_dtlb_4kb_store_misses),
+	    ld_2m = atomic64_read_acquire(&range->totals.total_dtlb_2mb_load_misses),
+	    st_2m = atomic64_read_acquire(&range->totals.total_dtlb_2mb_store_misses),
+	    total = ld_4k + st_4k + ld_2m + st_2m;
+
 	pr_warn("kbadgerd: [%llx, %llx) (%lld bytes)", range->start, range->end,
 			range->end - range->start);
-	if (total_misses(&range->totals)) {
-		pr_warn("kbadgerd: \t4KB load misses: %lld",
-				atomic64_read_acquire(&range->totals.total_dtlb_4kb_load_misses));
-		pr_warn("kbadgerd: \t4KB store misses: %lld",
-				atomic64_read_acquire(&range->totals.total_dtlb_4kb_store_misses));
-		pr_warn("kbadgerd: \t2MB load misses: %lld",
-				atomic64_read_acquire(&range->totals.total_dtlb_2mb_load_misses));
-		pr_warn("kbadgerd: \t2MB store misses: %lld\n",
-				atomic64_read_acquire(&range->totals.total_dtlb_2mb_store_misses));
+
+	if (total) {
+		// We want to scale the data to be in units of misses per LTU.
+		BUG_ON(range->nsamples == 0);
+		ld_4k = ld_4k * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / range->nsamples;
+		st_4k = st_4k * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / range->nsamples;
+		ld_2m = ld_2m * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / range->nsamples;
+		st_2m = st_2m * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / range->nsamples;
+
+		pr_warn("kbadgerd: \t4KB load misses: %lld", ld_4k);
+		pr_warn("kbadgerd: \t4KB store misses: %lld", st_4k);
+		pr_warn("kbadgerd: \t2MB load misses: %lld", ld_2m);
+		pr_warn("kbadgerd: \t2MB store misses: %lld\n", st_2m);
 	} else {
 		pr_warn("kbadgerd: \tNo misses\n");
 	}
@@ -710,6 +729,7 @@ static noinline void process_and_insert_current_range(void) {
 	// Mark the current range as explored. This decreases its priority in
 	// the next scan should we choose not to split it.
 	current_range->explored = true;
+	current_range->nsamples += 1;
 
 	// Remove the range from the range rb tree because it might be split
 	rb_erase(&current_range->range_node, &state.range);
@@ -926,8 +946,15 @@ static u64 tlb_miss_est_fn(const struct mm_action *action)
 
 	// If we found a range, compute the number of misses per page and return.
 	if (range) {
+		// Divide misses over the whole range.
 		ret = total_misses(&range->totals) /
 			((range->end - range->start) >> HPAGE_SHIFT);
+
+		// Scale up to be in LTU, then divide by number of samples.
+		if (ret > 0) {
+			BUG_ON(range->nsamples == 0);
+			ret = ret * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / range->nsamples;
+		}
 	}
 
 	spin_unlock(&state.lock);

@@ -3,11 +3,16 @@
 
 #include <linux/types.h>
 
+// Various possible actions, to be used with `struct mm_action`.
 #define MM_ACTION_NONE                 0
 #define MM_ACTION_PROMOTE_HUGE  (1 <<  0)
 #define MM_ACTION_DEMOTE_HUGE   (1 <<  1)
 #define MM_ACTION_RUN_DEFRAG    (1 <<  2)
 #define MM_ACTION_ALLOC_RECLAIM (1 <<  3)
+
+// The length of one Long Time Unit (LTU), the fundamental time accounting unit
+// of mm_econ. This value is in milliseconds (1 LTU = MM_ECON_LTU ms).
+#define MM_ECON_LTU 10000
 
 // An action that may be taken by the memory management subsystem.
 struct mm_action {
@@ -30,6 +35,8 @@ struct mm_action {
 
 // A typedef for function pointers for tlb miss estimator functions to be used
 // in estimating the number of TLB misses caused by the given page.
+//
+// The return value must be in units of `misses per LTU`.
 typedef u64 (*mm_econ_tlb_miss_estimator_fn_t)(const struct mm_action *);
 
 void register_mm_econ_tlb_miss_estimator(mm_econ_tlb_miss_estimator_fn_t f);
