@@ -913,7 +913,8 @@ static u64 tlb_miss_est_fn(const struct mm_action *action)
 	// processes that are not being inspected, so we want it to be fast.
 	//
 	// If this check succeeds, then we grab the lock and try again.
-	if (current->pid != state.inspected_task->pid
+	if (!state.inspected_task
+		|| current->pid != state.inspected_task->pid
 		|| !state.active
 		|| !state.current_range)
 	{
