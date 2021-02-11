@@ -2086,6 +2086,7 @@ skip:
 		}
 	}
 breakouterloop:
+	up_read(&mm->badger_trap_page_table_sem);
 	up_read(&mm->mmap_sem); /* exit_mmap will destroy ptes after this */
 breakouterloop_mmap_sem:
 
