@@ -3,5 +3,6 @@
 config KBADGERD
 	tristate "Adds the kbadgerd module."
 	default m
+	depends on MEMCG && TRANSPARENT_HUGEPAGE
 	help
 	  Adds the kbadgerd module.

@@ -823,6 +823,7 @@ config PAGE_COUNTER
 
 config MEMCG
 	bool "Memory controller"
+	default y
 	select PAGE_COUNTER
 	select EVENTFD
 	help
