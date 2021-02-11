@@ -1127,6 +1127,9 @@ out:
 	goto out_up_write;
 }
 
+/* badger_trap_page_table_sem must be held when entering. It will always be
+ * released before returning.
+ */
 static int khugepaged_scan_pmd(struct mm_struct *mm,
 			       struct vm_area_struct *vma,
 			       unsigned long address,
@@ -1149,6 +1152,7 @@ static int khugepaged_scan_pmd(struct mm_struct *mm,
 	pmd = mm_find_pmd(mm, address);
 	if (!pmd) {
 		result = SCAN_PMD_NULL;
+		up_read(&mm->badger_trap_page_table_sem);
 		goto out;
 	}
 
@@ -1262,6 +1266,8 @@ out_unmap:
 			up_read(&mm->mmap_sem);
 			ret = SCAN_MM_ECON_CANCEL;
 		}
+	} else {
+		up_read(&mm->badger_trap_page_table_sem);
 	}
 out:
 	trace_mm_khugepaged_scan_pmd(mm, page, writable, referenced,
@@ -2074,6 +2080,8 @@ skip:
 				ret = khugepaged_scan_pmd(mm, vma,
 						khugepaged_scan.address,
 						hpage);
+				/* khugepaged_scan_pmd always releases the
+				 * badger_trap_page_table_sem. */
 			}
 			/* move to next address */
 			khugepaged_scan.address += HPAGE_PMD_SIZE;
@@ -2086,7 +2094,6 @@ skip:
 		}
 	}
 breakouterloop:
-	up_read(&mm->badger_trap_page_table_sem);
 	up_read(&mm->mmap_sem); /* exit_mmap will destroy ptes after this */
 breakouterloop_mmap_sem:
 
