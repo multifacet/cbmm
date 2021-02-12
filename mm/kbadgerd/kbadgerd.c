@@ -322,12 +322,17 @@ static void print_data(struct kbadgerd_range *range) {
 			range->end - range->start);
 
 	if (total) {
+		u64 nsamples = range->nsamples;
+		if (nsamples == 0) {
+			pr_warn("kbadgerd: range has total %lld but 0 samples...\n", total);
+			nsamples += 1; // should only happen for active range...
+		}
+
 		// We want to scale the data to be in units of misses per LTU.
-		BUG_ON(range->nsamples == 0);
-		ld_4k = ld_4k * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / range->nsamples;
-		st_4k = st_4k * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / range->nsamples;
-		ld_2m = ld_2m * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / range->nsamples;
-		st_2m = st_2m * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / range->nsamples;
+		ld_4k = ld_4k * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / nsamples;
+		st_4k = st_4k * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / nsamples;
+		ld_2m = ld_2m * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / nsamples;
+		st_2m = st_2m * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / nsamples;
 
 		pr_warn("kbadgerd: \t4KB load misses: %lld", ld_4k);
 		pr_warn("kbadgerd: \t4KB store misses: %lld", st_4k);
