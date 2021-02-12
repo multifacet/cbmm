@@ -1087,6 +1087,7 @@ static int do_kbadgerd_init(void)
 	// Init state by clearing it.
 	memset(&state, 0, sizeof(state));
 	state.sleep_interval = KBADGERD_SLEEP_MS;
+	spin_lock_init(&state.lock);
 
 	kbadgerd_should_stop = false;
 	kbadgerd_task = kthread_run(kbadgerd_do_work, NULL, "kbadgerd");
