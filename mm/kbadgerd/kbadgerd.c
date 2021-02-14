@@ -89,7 +89,10 @@ struct kbadgerd_state {
 	/* List of the VMA ranges tracked to detect new ranges */
 	struct rb_root range;
 
-	/* Protects the three trees. */
+	/* Protects the three trees.
+	 *
+	 * Lock order: grab mmap_sem and badger_trap_page_table_sem before this lock.
+	 */
 	spinlock_t lock;
 
 	/* Current range. */
@@ -572,6 +575,7 @@ static noinline void check_for_new_vmas(void) {
 	struct kbadgerd_range *range;
 
 	down_read(&state.mm->mmap_sem);
+	spin_lock(&state.lock);
 
 	for (vma = state.mm->mmap; vma; vma = vma->vm_next) {
 		range = kbadgerd_has_holes(&state.data, &state.old_data,
@@ -586,6 +590,7 @@ static noinline void check_for_new_vmas(void) {
 		}
 	}
 
+	spin_unlock(&state.lock);
 	up_read(&state.mm->mmap_sem);
 }
 
@@ -618,6 +623,7 @@ static noinline void start_inspection(void) {
 	// between iterations of kbadgerd. This would lead to annoyances in
 	// managing pointers.
 	down_read(&state.mm->mmap_sem);
+	spin_lock(&state.lock);
 
 	state.data = RB_ROOT_CACHED;
 	state.old_data = RB_ROOT;
@@ -650,6 +656,7 @@ static noinline void start_inspection(void) {
 				vma_is_anonymous(vma));
 	}
 
+	spin_unlock(&state.lock);
 	up_read(&state.mm->mmap_sem);
 
 	// Start badger trap for the first range...
@@ -676,6 +683,8 @@ static noinline void end_inspection(void) {
 
 	// Collect final stats...
 	if (state.current_range) {
+		// NOTE: don't hold state.lock here because mmap_sem is grabbed
+		// by badger_trap_walk.
 		badger_trap_walk(state.mm,
 				state.current_range->start,
 				state.current_range->end - 1,
@@ -684,10 +693,14 @@ static noinline void end_inspection(void) {
 		badger_trap_add_stats(&state.current_range->totals,
 				&state.current_range->stats);
 
+		spin_lock(&state.lock);
+
 		// Add it back to the tree for simplicity.
 		kbadgerd_range_insert_by_weight(&state.data, state.current_range);
 		state.current_range = NULL;
 		badger_trap_set_stats_loc(state.mm, NULL);
+	} else {
+		spin_lock(&state.lock);
 	}
 
 	// Print all stats.
@@ -706,6 +719,8 @@ static noinline void end_inspection(void) {
 
 	state.range = RB_ROOT;
 
+	spin_unlock(&state.lock);
+
 	if (state.mm) {
 		mmdrop(state.mm);
 		state.mm = NULL;
@@ -720,6 +735,7 @@ static noinline void end_inspection(void) {
 	state.pid = 0;
 }
 
+// NOTE: caller must acquire state.lock. This function does NOT release the lock.
 static noinline void process_and_insert_current_range(void) {
 	struct kbadgerd_range *current_range = state.current_range;
 	struct kbadgerd_range *new_left_range, *new_right_range;
@@ -843,10 +859,12 @@ static noinline void continue_inspection(void) {
 	badger_trap_add_stats(&range->totals, &range->stats);
 
 	// Insert the current range back into the tree.
+	spin_lock(&state.lock);
 	process_and_insert_current_range();
 
 	// Move to the next range, if any.
 	state.current_range = kbadgerd_range_remove_max(&state.data);
+	spin_unlock(&state.lock);
 	if (!state.current_range) {
 		end_inspection();
 		return;
@@ -864,8 +882,6 @@ static int kbadgerd_do_work(void *data)
         u32 i = 0;
 
 	while (!kbadgerd_should_stop) {
-		spin_lock(&state.lock);
-
 		if (state.active && state.pid_changed) {
 			pr_warn("kbadgerd: pid changed. Ending inspection.");
 			end_inspection();
@@ -879,8 +895,6 @@ static int kbadgerd_do_work(void *data)
 		} else if (state.pid != 0) {
 			start_inspection();
 		}
-
-		spin_unlock(&state.lock);
 
                 i++;
 		pr_warn_once("kbadgerd: Interval is %d ms.\n", state.sleep_interval);
