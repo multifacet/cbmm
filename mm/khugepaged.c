@@ -1293,7 +1293,6 @@ promote_to_huge(struct mm_struct *mm,
 		return SCAN_FAIL;
 	}
 
-	spin_lock(&khugepaged_mm_lock);
 	down_read(&mm->mmap_sem);
 	down_read(&mm->badger_trap_page_table_sem);
 
@@ -1305,8 +1304,6 @@ promote_to_huge(struct mm_struct *mm,
 	} else {
 		put_page(hpage);
 	}
-
-	spin_unlock(&khugepaged_mm_lock);
 
 	pr_info("Attempted to promote %lx: result=%d hpage=%p",
 			address, result, hpage);
