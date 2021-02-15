@@ -988,6 +988,8 @@ static u64 tlb_miss_est_fn(const struct mm_action *action)
 
 	spin_unlock(&state.lock);
 
+	pr_warn("mm_econ: estimated=%llu\n", ret);
+
 	return ret;
 }
 

@@ -255,6 +255,7 @@ bool mm_econ_is_on(void)
 void
 mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
 {
+    pr_warn("mm_econ: action=%d address=%llx\n", action->action, action->address);
     switch (action->action) {
         case MM_ACTION_NONE:
             cost->cost = 0;
