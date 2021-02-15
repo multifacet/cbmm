@@ -297,6 +297,7 @@ bool mm_decide(const struct mm_cost_delta *cost)
     if (mm_econ_mode == 0) {
         return true;
     } else if (mm_econ_mode == 1) {
+        pr_warn("mm_econ: cost=%llu benefit=%llu\n", cost->cost, cost->benefit); // TODO remove
         return cost->benefit > cost->cost;
     } else {
         BUG();
