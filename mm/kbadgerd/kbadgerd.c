@@ -967,9 +967,17 @@ static u64 tlb_miss_est_fn(const struct mm_action *action)
 	// If we found a range, compute the number of misses per page and return.
 	if (range) {
 		// Divide misses over the whole range.
-		BUG_ON(((range->end - range->start) >> HPAGE_SHIFT) == 0);
-		ret = total_misses(&range->totals) /
-			((range->end - range->start) >> HPAGE_SHIFT);
+		//
+		// NOTE: it's possible that the range is smaller than 2MB in
+		// size if it derives from a VMA that was smaller than 2MB.
+		// It's not clear what the best way to scale it is, so we jsut
+		// do the most obvious thing here...
+		u64 npages = (range->end - range->start) >> HPAGE_SHIFT;
+		if (npages == 0) {
+			ret = total_misses(&range->totals);
+		} else {
+			ret = total_misses(&range->totals) / npages;
+		}
 
 		// Scale up to be in LTU, then divide by number of samples.
 		if (ret > 0) {
