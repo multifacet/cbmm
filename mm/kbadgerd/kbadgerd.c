@@ -324,18 +324,26 @@ static void print_data(struct kbadgerd_range *range) {
 	pr_warn("kbadgerd: [%llx, %llx) (%lld bytes)", range->start, range->end,
 			range->end - range->start);
 
+	// We want to print values in units of misses/huge-page/LTU.
 	if (total) {
+		u64 size = (range->end - range->start) >> HPAGE_SHIFT;
 		u64 nsamples = range->nsamples;
 		if (nsamples == 0) {
 			pr_warn("kbadgerd: range has total %lld but 0 samples...\n", total);
 			nsamples += 1; // should only happen for active range...
 		}
 
-		// We want to scale the data to be in units of misses per LTU.
-		ld_4k = ld_4k * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / nsamples;
-		st_4k = st_4k * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / nsamples;
-		ld_2m = ld_2m * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / nsamples;
-		st_2m = st_2m * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / nsamples;
+		// Scale time
+		ld_4k *= (MM_ECON_LTU / KBADGERD_SLEEP_MS) / nsamples;
+		st_4k *= (MM_ECON_LTU / KBADGERD_SLEEP_MS) / nsamples;
+		ld_2m *= (MM_ECON_LTU / KBADGERD_SLEEP_MS) / nsamples;
+		st_2m *= (MM_ECON_LTU / KBADGERD_SLEEP_MS) / nsamples;
+
+		// Scale size
+		ld_4k /= size > 0 ? size : 1;
+		st_4k /= size > 0 ? size : 1;
+		ld_2m /= size > 0 ? size : 1;
+		st_2m /= size > 0 ? size : 1;
 
 		pr_warn("kbadgerd: \t4KB load misses: %lld", ld_4k);
 		pr_warn("kbadgerd: \t4KB store misses: %lld", st_4k);

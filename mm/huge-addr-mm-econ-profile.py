@@ -43,6 +43,8 @@ with open(FILE, 'r') as f:
         prev_end = end
         prev_misses = misses
 
+        # TODO: convert to misses / page / LTU
+
 datap = [hex(r[0])+" "+hex(r[1])+" "+str(int(count)) for r, count in data.items()]
 print("mm_econ", ";".join(datap))
 print()
