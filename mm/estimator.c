@@ -23,6 +23,7 @@ static int mm_econ_mode = 0;
 struct profile_range {
     u64 start;
     u64 end;
+    // This should already be in units of misses/huge-page/LTU.
     u64 misses;
 
     struct rb_node node;
@@ -40,6 +41,8 @@ static mm_econ_tlb_miss_estimator_fn_t tlb_miss_est_fn = NULL;
 // There are two possible estimators:
 // 1. kbadgerd (via tlb_miss_est_fn).
 // 2. A pre-loaded profile (via preloaded_profile).
+//
+// In both cases, the required units are misses/huge-page/LTU.
 
 void register_mm_econ_tlb_miss_estimator(
         mm_econ_tlb_miss_estimator_fn_t f)
@@ -176,10 +179,8 @@ compute_hpage_benefit_from_profile(
     u64 ret = 0;
     struct profile_range *range = profile_search(action->address);
 
-    // If we found a range, compute the number of misses per page and return.
     if (range) {
-        ret = range->misses /
-            ((range->end - range->start) >> HPAGE_SHIFT);
+        ret = range->misses;
 
         pr_warn("mm_econ: estimating page benefit: "
                 "misses=%llu size=%llu per-page=%llu\n",
