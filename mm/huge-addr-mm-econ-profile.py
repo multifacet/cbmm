@@ -34,8 +34,11 @@ with open(FILE, 'r') as f:
         # general case
         end = int(row["Huge page"], base=16)
         misses = total_misses(row)
+
+        diff = prev_misses - misses
         
-        data[(prev_end, end)] = prev_misses - misses
+        if diff > 0:
+            data[(prev_end, end)] = diff
 
         prev_end = end
         prev_misses = misses
