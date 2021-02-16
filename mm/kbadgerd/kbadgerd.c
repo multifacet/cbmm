@@ -992,11 +992,15 @@ static u64 tlb_miss_est_fn(const struct mm_action *action)
 			BUG_ON(range->nsamples == 0);
 			ret = ret * (MM_ECON_LTU / KBADGERD_SLEEP_MS) / range->nsamples;
 		}
+
+		pr_warn("mm_econ: estimating page benefit: "
+			"misses=%llu size=%llu per-page=%llu\n",
+			ret,
+			(range->end - range->start) >> HPAGE_SHIFT,
+			ret);
 	}
 
 	spin_unlock(&state.lock);
-
-	pr_warn("mm_econ: estimated=%llu\n", ret);
 
 	return ret;
 }
