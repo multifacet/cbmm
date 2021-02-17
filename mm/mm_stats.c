@@ -365,6 +365,10 @@ MM_STATS_PROC_CREATE_HIST(mm_huge_page_promotion_copy_pages_cycles);
 MM_STATS_PROC_CREATE_HIST(mm_process_huge_page_cycles);
 MM_STATS_PROC_CREATE_HIST(mm_process_huge_page_single_page_cycles);
 
+// Histograms of estimated costs and benefits for mm_econ.
+MM_STATS_PROC_CREATE_HIST(mm_econ_cost);
+MM_STATS_PROC_CREATE_HIST(mm_econ_benefit);
+
 void mm_stats_init(void)
 {
     MM_STATS_INIT_HIST(mm_base_page_fault_cycles);
@@ -382,4 +386,7 @@ void mm_stats_init(void)
     MM_STATS_INIT_HIST(mm_huge_page_promotion_copy_pages_cycles);
     MM_STATS_INIT_HIST(mm_process_huge_page_cycles);
     MM_STATS_INIT_HIST(mm_process_huge_page_single_page_cycles);
+
+    MM_STATS_INIT_HIST(mm_econ_cost);
+    MM_STATS_INIT_HIST(mm_econ_benefit);
 }

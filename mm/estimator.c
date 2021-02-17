@@ -8,6 +8,7 @@
 #include <linux/kobject.h>
 #include <linux/init.h>
 #include <linux/hashtable.h>
+#include <linux/mm_stats.h>
 
 #define HUGE_PAGE_ORDER 9
 
@@ -267,41 +268,44 @@ bool mm_econ_is_on(void)
 void
 mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
 {
-    mm_econ_num_estimates += 1;
-
     switch (action->action) {
         case MM_ACTION_NONE:
             cost->cost = 0;
             cost->benefit = 0;
-            return;
+            break;
 
         case MM_ACTION_PROMOTE_HUGE:
             mm_estimate_huge_page_promote_cost_benefit(action, cost);
-            return;
+            break;
 
         case MM_ACTION_DEMOTE_HUGE:
             // TODO(markm)
             cost->cost = 0;
             cost->benefit = 0;
-            return;
+            break;
 
         case MM_ACTION_RUN_DEFRAG:
             // TODO(markm)
             cost->cost = 0;
             cost->benefit = 0;
-            return;
+            break;
 
         case MM_ACTION_ALLOC_RECLAIM:
             // Estimate the cost/benefit of the promotion itself.
             mm_estimate_huge_page_promote_cost_benefit(action, cost);
             // Update the cost if we also need to do reclaim.
             mm_estimate_huge_page_reclaim_cost(action, cost);
-            return;
+            break;
 
         default:
             printk(KERN_WARNING "Unknown mm_action %d\n", action->action);
-            return;
+            break;
     }
+
+    // Record some stats for debugging.
+    mm_econ_num_estimates += 1;
+    mm_stats_hist_measure(&mm_econ_cost, cost->cost);
+    mm_stats_hist_measure(&mm_econ_benefit, cost->benefit);
 }
 
 // Decide whether to take an action with the given cost. Returns true if the
