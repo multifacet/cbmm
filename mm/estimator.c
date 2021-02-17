@@ -182,11 +182,11 @@ compute_hpage_benefit_from_profile(
     if (range) {
         ret = range->misses;
 
-        pr_warn("mm_econ: estimating page benefit: "
-                "misses=%llu size=%llu per-page=%llu\n",
-                range->misses,
-                (range->end - range->start) >> HPAGE_SHIFT,
-                ret);
+        //pr_warn("mm_econ: estimating page benefit: "
+        //        "misses=%llu size=%llu per-page=%llu\n",
+        //        range->misses,
+        //        (range->end - range->start) >> HPAGE_SHIFT,
+        //        ret);
     }
 
     return ret;
