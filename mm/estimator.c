@@ -35,6 +35,17 @@ static struct rb_root preloaded_profile = RB_ROOT;
 // The TLB misses estimator, if any.
 static mm_econ_tlb_miss_estimator_fn_t tlb_miss_est_fn = NULL;
 
+// Some stats...
+
+// Number of estimates made.
+static u64 mm_econ_num_estimates = 0;
+// Number of decisions made.
+static u64 mm_econ_num_decisions = 0;
+// Number of decisions that are "yes".
+static u64 mm_econ_num_decisions_yes = 0;
+// Number of huge page promotions in #PFs.
+static u64 mm_econ_num_hp_promotions = 0;
+
 ///////////////////////////////////////////////////////////////////////////////
 // Actual implementation
 //
@@ -256,6 +267,8 @@ bool mm_econ_is_on(void)
 void
 mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
 {
+    mm_econ_num_estimates += 1;
+
     switch (action->action) {
         case MM_ACTION_NONE:
             cost->cost = 0;
@@ -295,9 +308,13 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
 // action associated with `cost` should be TAKEN, and false otherwise.
 bool mm_decide(const struct mm_cost_delta *cost)
 {
+    mm_econ_num_decisions += 1;
+
     if (mm_econ_mode == 0) {
         return true;
     } else if (mm_econ_mode == 1) {
+        mm_econ_num_decisions_yes += 1;
+
         //pr_warn("mm_econ: cost=%llu benefit=%llu\n", cost->cost, cost->benefit); // TODO remove
         return cost->benefit > cost->cost;
     } else {
@@ -309,7 +326,7 @@ bool mm_decide(const struct mm_cost_delta *cost)
 // Inform the estimator of the promotion of the given huge page.
 void mm_register_promotion(u64 addr)
 {
-    // TODO: not sure if we need this, but the hooks are in place elsewhere...
+    mm_econ_num_hp_promotions += 1;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -345,6 +362,27 @@ static ssize_t enabled_store(struct kobject *kobj,
 }
 static struct kobj_attribute enabled_attr =
 __ATTR(enabled, 0644, enabled_show, enabled_store);
+
+static ssize_t stats_show(struct kobject *kobj,
+        struct kobj_attribute *attr, char *buf)
+{
+    return sprintf(buf,
+            "estimated=%lld\ndecided=%lld\n"
+            "yes=%lld\npromoted=%lld\n",
+            mm_econ_num_estimates,
+            mm_econ_num_decisions,
+            mm_econ_num_decisions_yes,
+            mm_econ_num_hp_promotions);
+}
+
+static ssize_t stats_store(struct kobject *kobj,
+        struct kobj_attribute *attr,
+        const char *buf, size_t count)
+{
+    return -EINVAL;
+}
+static struct kobj_attribute stats_attr =
+__ATTR(stats, 0444, stats_show, stats_store);
 
 static ssize_t preloaded_profile_show(struct kobject *kobj,
         struct kobj_attribute *attr, char *buf)
@@ -449,6 +487,7 @@ __ATTR(preloaded_profile, 0644, preloaded_profile_show, preloaded_profile_store)
 static struct attribute *mm_econ_attr[] = {
     &enabled_attr.attr,
     &preloaded_profile_attr.attr,
+    &stats_attr.attr,
     NULL,
 };
 
