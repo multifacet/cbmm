@@ -5,6 +5,7 @@
 #include <linux/mm_stats.h>
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
+#include <linux/fs.h>
 
 #define MM_STATS_INSTR_BUFSIZE 24
 
@@ -316,6 +317,7 @@ static int hist_sprintf(struct file *file, char __user *ubuf,
 ///////////////////////////////////////////////////////////////////////////////
 // Implement the pftrace stuff.
 
+// Convert flags to text names for the sake of debugging/printing.
 char *mm_stats_pf_flags_names[MM_STATS_NUM_FLAGS] = {
 	[MM_STATS_PF_HUGE_PAGE] = "MM_STATS_PF_HUGE_PAGE",
 	[MM_STATS_PF_VERY_HUGE_PAGE] = "MM_STATS_PF_VERY_HUGE_PAGE",
@@ -327,6 +329,43 @@ char *mm_stats_pf_flags_names[MM_STATS_NUM_FLAGS] = {
 	[MM_STATS_PF_HUGE_ALLOC_FAILED] = "MM_STATS_PF_HUGE_ALLOC_FAILED",
 };
 
+// Create /proc/pftrace_enable which enables/disables pftrace.
+// 0: off
+// !0: on
+MM_STATS_PROC_CREATE_INT(int, pftrace_enable, 0, "%d")
+
+// This is the pftrace file, found at "/pftrace". We also keep track of the
+// file offset for writes and the number of writes so far so we can batch
+// fsyncing.
+#define MM_STATS_PFTRACE_FNAME "pftrace"
+static struct file *pftrace_file = NULL;
+static loff_t pftrace_pos = 0;
+static long pftrace_nwrites = 0;
+
+static inline int open_pftrace_file(void) {
+    struct file *file;
+    long err;
+
+    // Don't open multiple times.
+    if (likely(pftrace_file != NULL)) return 0;
+
+    // Open the file.
+    file = filp_open(MM_STATS_PFTRACE_FNAME,
+            O_WRONLY | O_CREAT | O_TRUNC, 0444);
+    if (IS_ERR(file)) {
+        err = PTR_ERR(file);
+        pr_err("mm_stats: Failed to open pftrace file. errno=%ld\n", err);
+        return err;
+    }
+
+    // Successfully opened the file!
+
+    pftrace_file = file;
+
+    pr_warn("mm_stats: Successfully opened /%s\n", MM_STATS_PFTRACE_FNAME);
+    return 0;
+}
+
 void mm_stats_pftrace_init(struct mm_stats_pftrace *trace)
 {
     memset(trace, 0, sizeof(struct mm_stats_pftrace));
@@ -334,17 +373,25 @@ void mm_stats_pftrace_init(struct mm_stats_pftrace *trace)
 
 void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
 {
-    int i;
-
-    // TODO(markm): for now, just dump to dmesg while we are testing... later
-    // we'll want to do something more efficient.
-
     const u64 PFTHRESHOLD = 1000 * 100; // ~100us
+    long err;
+    ssize_t total_written = 0, written;
+
+    // Check if pftrace is on.
+    if (!pftrace_enable) return;
+
+    // Filter out some events.
+    // TODO: more complex filter...
     if (trace->end_tsc - trace->start_tsc < PFTHRESHOLD) {
         return;
     }
 
-    pr_warn("mm_stats: total=%llu bits=%llx",
+    // Make sure the trace file is open.
+    err = open_pftrace_file();
+    if (err) return;
+
+    /* for debugging...
+    pr_warn("mm_stats: total=%10llu bits=%llx",
             trace->end_tsc - trace->start_tsc,
             trace->bitflags);
 
@@ -352,6 +399,24 @@ void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
         if (mm_stats_test_flag(trace, i)) {
             pr_cont(" %s", mm_stats_pf_flags_names[i]);
         }
+    }
+    */
+
+    // Write the trace directly to the end of the file.
+    while (total_written < sizeof(struct mm_stats_pftrace)) {
+        written = kernel_write(pftrace_file, trace,
+                sizeof(struct mm_stats_pftrace), &pftrace_pos);
+        if (written < 0) {
+            pr_err("mm_stats: error writing pftrace: %ld\n", written);
+            return;
+        }
+
+        total_written += written;
+    }
+
+    // Every 1000 writes, flush.
+    if (++pftrace_nwrites % 1000 == 0) {
+        vfs_fsync(pftrace_file, 0);
     }
 }
 
@@ -413,6 +478,8 @@ MM_STATS_PROC_CREATE_HIST(mm_econ_benefit);
 
 void mm_stats_init(void)
 {
+    MM_STATS_INIT_INT(pftrace_enable);
+
     MM_STATS_INIT_HIST(mm_base_page_fault_cycles);
     MM_STATS_INIT_HIST(mm_huge_page_fault_cycles);
     MM_STATS_INIT_HIST(mm_huge_page_fault_create_new_cycles);
