@@ -649,6 +649,8 @@ static void try_huge_addr_promote(pid_t pid, u64 addr)
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
 	struct task_struct *target_task = get_pid_task(find_get_pid(pid), PIDTYPE_PID);
+	struct mm_stats_pftrace pftrace; // dummy, not used
+	mm_stats_pftrace_init(&pftrace);
 
 	if (!target_task) {
 		pr_info("no such pid for promotion");
@@ -658,7 +660,7 @@ static void try_huge_addr_promote(pid_t pid, u64 addr)
 	mm = target_task->mm;
 	vma = find_vma(mm, addr);
 
-	promote_to_huge(mm, vma, addr);
+	promote_to_huge(mm, vma, addr, &pftrace);
 
 	put_task_struct(target_task);
 }

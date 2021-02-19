@@ -1278,7 +1278,8 @@ out:
 int
 promote_to_huge(struct mm_struct *mm,
 		struct vm_area_struct *vma,
-		unsigned long address)
+		unsigned long address,
+		struct mm_stats_pftrace *pftrace)
 {
 	int node;
 	int result;

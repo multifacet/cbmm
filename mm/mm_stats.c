@@ -318,8 +318,13 @@ static int hist_sprintf(struct file *file, char __user *ubuf,
 
 char *mm_stats_pf_flags_names[MM_STATS_NUM_FLAGS] = {
 	[MM_STATS_PF_HUGE_PAGE] = "MM_STATS_PF_HUGE_PAGE",
-	[MM_STATS_PF_HUGE_ALLOC_FAILED] = "MM_STATS_PF_HUGE_ALLOC_FAILED",
+	[MM_STATS_PF_VERY_HUGE_PAGE] = "MM_STATS_PF_VERY_HUGE_PAGE",
 	[MM_STATS_PF_BADGER_TRAP] = "MM_STATS_PF_BADGER_TRAP",
+        [MM_STATS_PF_COW] = "MM_STATS_PF_COW",
+	[MM_STATS_PF_NUMA] = "MM_STATS_PF_NUMA",
+	[MM_STATS_PF_SWAP] = "MM_STATS_PF_SWAP",
+        [MM_STATS_PF_NOT_ANON] = "MM_STATS_PF_NOT_ANON",
+	[MM_STATS_PF_HUGE_ALLOC_FAILED] = "MM_STATS_PF_HUGE_ALLOC_FAILED",
 };
 
 void mm_stats_pftrace_init(struct mm_stats_pftrace *trace)

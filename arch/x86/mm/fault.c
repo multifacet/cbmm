@@ -1499,8 +1499,7 @@ good_area:
 
 	// markm: check if we should promote the recently created page.
 	if (!is_huge && huge_addr_enabled(vma, address)) {
-		// TODO(markm): pass pftrace...
-		ret = promote_to_huge(mm, vma, address & HPAGE_PMD_MASK);
+		ret = promote_to_huge(mm, vma, address & HPAGE_PMD_MASK, pftrace);
 		if (ret == SCAN_SUCCEED) {
 			mm_register_promotion(address & HPAGE_PMD_MASK);
 		}

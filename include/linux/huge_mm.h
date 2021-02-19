@@ -97,9 +97,14 @@ extern char huge_addr_comm[MAX_HUGE_ADDR_COMM];
 
 bool huge_addr_enabled(struct vm_area_struct *vma, unsigned long address);
 
+// This struct is defined in linux/mm_stats.h, but I don't want to include it
+// here because means any change to that header would require recompiling a
+// bunch of the kernel.
+struct mm_stats_pftrace;
 int promote_to_huge(struct mm_struct *mm,
 		struct vm_area_struct *vma,
-		unsigned long address);
+		unsigned long address,
+		struct mm_stats_pftrace *pftrace);
 
 enum scan_result {
 	SCAN_FAIL,

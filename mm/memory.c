@@ -4154,7 +4154,8 @@ static int do_fake_page_fault(struct mm_struct *mm, struct vm_area_struct *vma,
  * The mmap_sem may have been released depending on flags and our return value.
  * See filemap_fault() and __lock_page_or_retry().
  */
-static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
+static vm_fault_t handle_pte_fault(struct vm_fault *vmf,
+				   struct mm_stats_pftrace *pftrace)
 {
 	pte_t entry;
 	vm_fault_t ret;
@@ -4206,6 +4207,8 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 		    if((vmf->flags & FAULT_FLAG_WRITE)
 			    && !pte_write(entry))
 		    {
+			mm_stats_set_flag(pftrace, MM_STATS_PF_COW);
+
 			// We want to do this here because we want
 			// do_wp_page not to see the magical reserved bit.
 			vmf->ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
@@ -4225,6 +4228,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 		    }
 		    else
 		    {
+			mm_stats_set_flag(pftrace, MM_STATS_PF_BADGER_TRAP);
 			vmf->ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
 			spin_lock(vmf->ptl);
 			return do_fake_page_fault(vmf->vma->vm_mm, vmf->vma,
@@ -4285,15 +4289,21 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 	if (!vmf->pte) {
 		if (vma_is_anonymous(vmf->vma))
 			return do_anonymous_page(vmf);
-		else
+		else {
+			mm_stats_set_flag(pftrace, MM_STATS_PF_NOT_ANON);
 			return do_fault(vmf);
+		}
 	}
 
-	if (!pte_present(vmf->orig_pte))
+	if (!pte_present(vmf->orig_pte)) {
+		mm_stats_set_flag(pftrace, MM_STATS_PF_SWAP);
 		return do_swap_page(vmf);
+	}
 
-	if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma))
+	if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma)) {
+		mm_stats_set_flag(pftrace, MM_STATS_PF_NUMA);
 		return do_numa_page(vmf);
+	}
 
 	vmf->ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
 	spin_lock(vmf->ptl);
@@ -4301,8 +4311,10 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 	if (unlikely(!pte_same(*vmf->pte, entry)))
 		goto unlock;
 	if (vmf->flags & FAULT_FLAG_WRITE) {
-		if (!pte_write(entry))
+		if (!pte_write(entry)) {
+			mm_stats_set_flag(pftrace, MM_STATS_PF_COW);
 			return do_wp_page(vmf);
+		}
 		entry = pte_mkdirty(entry);
 	}
 	entry = pte_mkyoung(entry);
@@ -4411,8 +4423,6 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 
 	// (markm) cr3->pgd->p4d->pud->pmd->pt->page
 
-	// TODO(markm): pftrace this whole thing...
-
 	pgd = pgd_offset(mm, address);
 	p4d = p4d_alloc(mm, pgd, address);
 	if (!p4d)
@@ -4429,6 +4439,8 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	    if ((vmf.flags & FAULT_FLAG_WRITE) && is_pud_reserved(orig_pud)
 		    && !pud_write(orig_pud) && pud_present(orig_pud))
 	    {
+		mm_stats_set_flag(pftrace, MM_STATS_PF_VERY_HUGE_PAGE);
+		mm_stats_set_flag(pftrace, MM_STATS_PF_COW);
 		// NOTE: This is pseudocode... Linux doesn't support
 		// transparent 1GB huge pages yet...
 		//
@@ -4438,6 +4450,8 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 
 	    if (is_pud_reserved(orig_pud) && pud_present(orig_pud))
 	    {
+		mm_stats_set_flag(pftrace, MM_STATS_PF_VERY_HUGE_PAGE);
+		mm_stats_set_flag(pftrace, MM_STATS_PF_BADGER_TRAP);
 		// NOTE: This is pseudocode... Linux doesn't support
 		// transparent 1GB huge pages yet...
 		//
@@ -4477,8 +4491,10 @@ retry_pud:
 
 		if (should_do) {
 			ret = create_huge_pud(&vmf);
-			if (!(ret & VM_FAULT_FALLBACK))
+			if (!(ret & VM_FAULT_FALLBACK)) {
+				mm_stats_set_flag(pftrace, MM_STATS_PF_VERY_HUGE_PAGE);
 				return ret;
+			}
 		}
 	} else {
 		// (markm) Entry is already present.
@@ -4491,8 +4507,11 @@ retry_pud:
 
 			if (dirty && !pud_write(orig_pud)) {
 				ret = wp_huge_pud(&vmf, orig_pud);
-				if (!(ret & VM_FAULT_FALLBACK))
+				if (!(ret & VM_FAULT_FALLBACK)) {
+					mm_stats_set_flag(pftrace, MM_STATS_PF_VERY_HUGE_PAGE);
+					mm_stats_set_flag(pftrace, MM_STATS_PF_COW);
 					return ret;
+				}
 			} else {
 				huge_pud_set_accessed(&vmf, orig_pud);
 				return 0;
@@ -4513,10 +4532,14 @@ retry_pud:
                 if ((vmf.flags & FAULT_FLAG_WRITE) && is_pmd_reserved(orig_pmd)
 			&& !pmd_write(orig_pmd) && pmd_present(orig_pmd))
                 {
+			mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_PAGE);
+			mm_stats_set_flag(pftrace, MM_STATS_PF_COW);
 			return do_huge_pmd_wp_page(&vmf, orig_pmd);
                 }
                 if (is_pmd_reserved(orig_pmd) && pmd_present(orig_pmd))
                 {
+			mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_PAGE);
+			mm_stats_set_flag(pftrace, MM_STATS_PF_BADGER_TRAP);
                         ret = transparent_fake_fault(&vmf);
 			return ret;
                 }
@@ -4570,13 +4593,16 @@ retry_pud:
 			return 0;
 		}
 		if (pmd_trans_huge(orig_pmd) || pmd_devmap(orig_pmd)) {
-			if (pmd_protnone(orig_pmd) && vma_is_accessible(vma))
+			if (pmd_protnone(orig_pmd) && vma_is_accessible(vma)) {
+				mm_stats_set_flag(pftrace, MM_STATS_PF_NUMA);
 				return do_huge_pmd_numa_page(&vmf, orig_pmd);
+			}
 
 			// TODO(markm): wp_huge_pmd/pud are for huge COW
 			// faults. Should add mm-econ logic here too.
 			if (dirty && !pmd_write(orig_pmd)) {
 				ret = wp_huge_pmd(&vmf, orig_pmd);
+				mm_stats_set_flag(pftrace, MM_STATS_PF_COW);
 				if (!(ret & VM_FAULT_FALLBACK))
 					return ret;
 			} else {
@@ -4586,7 +4612,7 @@ retry_pud:
 		}
 	}
 
-	return handle_pte_fault(&vmf) | VM_FAULT_BASE_PAGE;
+	return handle_pte_fault(&vmf, pftrace) | VM_FAULT_BASE_PAGE;
 }
 
 /*
