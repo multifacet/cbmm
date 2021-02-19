@@ -1298,7 +1298,8 @@ NOKPROBE_SYMBOL(do_kern_addr_fault);
 static inline
 bool do_user_addr_fault(struct pt_regs *regs,
 			unsigned long hw_error_code,
-			unsigned long address)
+			unsigned long address,
+			struct mm_stats_pftrace *pftrace)
 {
 	struct vm_area_struct *vma;
 	struct task_struct *tsk;
@@ -1458,7 +1459,7 @@ good_area:
 	 * userland). The return to userland is identified whenever
 	 * FAULT_FLAG_USER|FAULT_FLAG_KILLABLE are both set in flags.
 	 */
-	fault = handle_mm_fault(vma, address, flags);
+	fault = handle_mm_fault(vma, address, flags, pftrace);
 	major |= fault & VM_FAULT_MAJOR;
 
 	is_huge = !(fault & (VM_FAULT_OOM | VM_FAULT_BASE_PAGE));
@@ -1498,6 +1499,7 @@ good_area:
 
 	// markm: check if we should promote the recently created page.
 	if (!is_huge && huge_addr_enabled(vma, address)) {
+		// TODO(markm): pass pftrace...
 		ret = promote_to_huge(mm, vma, address & HPAGE_PMD_MASK);
 		if (ret == SCAN_SUCCEED) {
 			mm_register_promotion(address & HPAGE_PMD_MASK);
@@ -1530,7 +1532,7 @@ NOKPROBE_SYMBOL(do_user_addr_fault);
  */
 static noinline bool
 __do_page_fault(struct pt_regs *regs, unsigned long hw_error_code,
-		unsigned long address)
+		unsigned long address, struct mm_stats_pftrace *pftrace)
 {
 	prefetchw(&current->mm->mmap_sem);
 
@@ -1542,7 +1544,7 @@ __do_page_fault(struct pt_regs *regs, unsigned long hw_error_code,
 		do_kern_addr_fault(regs, hw_error_code, address);
         return false;
     } else {
-		return do_user_addr_fault(regs, hw_error_code, address);
+		return do_user_addr_fault(regs, hw_error_code, address, pftrace);
     }
 }
 NOKPROBE_SYMBOL(__do_page_fault);
@@ -1566,17 +1568,26 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code, unsigned long addr
 	enum ctx_state prev_state;
     bool huge;
 
-    u64 start = rdtsc();
+    struct mm_stats_pftrace pftrace;
+    mm_stats_pftrace_init(&pftrace);
+    pftrace.start_tsc = rdtsc();
 
 	prev_state = exception_enter();
 	trace_page_fault_entries(regs, error_code, address);
-	huge = __do_page_fault(regs, error_code, address);
+	huge = __do_page_fault(regs, error_code, address, &pftrace);
 	exception_exit(prev_state);
 
+    pftrace.end_tsc = rdtsc();
+
     if (huge) {
-        mm_stats_hist_measure(&mm_huge_page_fault_cycles, rdtsc() - start);
+	mm_stats_set_flag(&pftrace, MM_STATS_PF_HUGE_PAGE);
+        mm_stats_hist_measure(&mm_huge_page_fault_cycles,
+			pftrace.end_tsc - pftrace.start_tsc);
     } else {
-        mm_stats_hist_measure(&mm_base_page_fault_cycles, rdtsc() - start);
+        mm_stats_hist_measure(&mm_base_page_fault_cycles,
+			pftrace.end_tsc - pftrace.start_tsc);
     }
+
+    mm_stats_pftrace_submit(&pftrace);
 }
 NOKPROBE_SYMBOL(do_page_fault);

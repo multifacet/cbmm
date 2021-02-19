@@ -1458,8 +1458,13 @@ int generic_error_remove_page(struct address_space *mapping, struct page *page);
 int invalidate_inode_page(struct page *page);
 
 #ifdef CONFIG_MMU
+// This struct is defined in linux/mm_stats.h, but I don't want to include it
+// here because means any change to that header would require recompiling a
+// bunch of the kernel.
+struct mm_stats_pftrace;
 extern vm_fault_t handle_mm_fault(struct vm_area_struct *vma,
-			unsigned long address, unsigned int flags);
+			unsigned long address, unsigned int flags,
+			struct mm_stats_pftrace *pftrace);
 extern int fixup_user_fault(struct task_struct *tsk, struct mm_struct *mm,
 			    unsigned long address, unsigned int fault_flags,
 			    bool *unlocked);

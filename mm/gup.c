@@ -17,6 +17,7 @@
 #include <linux/migrate.h>
 #include <linux/mm_inline.h>
 #include <linux/sched/mm.h>
+#include <linux/mm_stats.h>
 
 #include <asm/mmu_context.h>
 #include <asm/pgtable.h>
@@ -620,6 +621,8 @@ static int faultin_page(struct task_struct *tsk, struct vm_area_struct *vma,
 {
 	unsigned int fault_flags = 0;
 	vm_fault_t ret;
+	struct mm_stats_pftrace pftrace; // dummy, not used
+	mm_stats_pftrace_init(&pftrace);
 
 	/* mlock all present pages, but do not fault in new pages */
 	if ((*flags & (FOLL_POPULATE | FOLL_MLOCK)) == FOLL_MLOCK)
@@ -637,7 +640,7 @@ static int faultin_page(struct task_struct *tsk, struct vm_area_struct *vma,
 		fault_flags |= FAULT_FLAG_TRIED;
 	}
 
-	ret = handle_mm_fault(vma, address, fault_flags);
+	ret = handle_mm_fault(vma, address, fault_flags, &pftrace);
 	if (ret & VM_FAULT_ERROR) {
 		int err = vm_fault_to_errno(ret, *flags);
 
@@ -957,6 +960,8 @@ int fixup_user_fault(struct task_struct *tsk, struct mm_struct *mm,
 {
 	struct vm_area_struct *vma;
 	vm_fault_t ret, major = 0;
+	struct mm_stats_pftrace pftrace; // dummy, not used
+	mm_stats_pftrace_init(&pftrace);
 
 	address = untagged_addr(address);
 
@@ -971,7 +976,7 @@ retry:
 	if (!vma_permits_fault(vma, fault_flags))
 		return -EFAULT;
 
-	ret = handle_mm_fault(vma, address, fault_flags);
+	ret = handle_mm_fault(vma, address, fault_flags, &pftrace);
 	major |= ret & VM_FAULT_MAJOR;
 	if (ret & VM_FAULT_ERROR) {
 		int err = vm_fault_to_errno(ret, 0);

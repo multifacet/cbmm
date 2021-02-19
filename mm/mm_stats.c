@@ -314,6 +314,43 @@ static int hist_sprintf(struct file *file, char __user *ubuf,
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Implement the pftrace stuff.
+
+char *mm_stats_pf_flags_names[MM_STATS_NUM_FLAGS] = {
+	[MM_STATS_PF_HUGE_PAGE] = "MM_STATS_PF_HUGE_PAGE",
+	[MM_STATS_PF_HUGE_ALLOC_FAILED] = "MM_STATS_PF_HUGE_ALLOC_FAILED",
+	[MM_STATS_PF_BADGER_TRAP] = "MM_STATS_PF_BADGER_TRAP",
+};
+
+void mm_stats_pftrace_init(struct mm_stats_pftrace *trace)
+{
+    memset(trace, 0, sizeof(struct mm_stats_pftrace));
+}
+
+void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
+{
+    int i;
+
+    // TODO(markm): for now, just dump to dmesg while we are testing... later
+    // we'll want to do something more efficient.
+
+    const u64 PFTHRESHOLD = 1000 * 100; // ~100us
+    if (trace->end_tsc - trace->start_tsc < PFTHRESHOLD) {
+        return;
+    }
+
+    pr_warn("mm_stats: total=%llu bits=%llx",
+            trace->end_tsc - trace->start_tsc,
+            trace->bitflags);
+
+    for (i = 0; i < MM_STATS_NUM_FLAGS; ++i) {
+        if (mm_stats_test_flag(trace, i)) {
+            pr_cont(" %s", mm_stats_pf_flags_names[i]);
+        }
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Define various stats below.
 
 // Histograms of page fault latency (base page and huge page).

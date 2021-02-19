@@ -4,6 +4,9 @@
 #include <linux/proc_fs.h>
 #include <linux/types.h>
 
+///////////////////////////////////////////////////////////////////////////////
+// Histograms.
+
 struct mm_hist;
 
 void mm_stats_init(void);
@@ -30,5 +33,78 @@ extern struct mm_hist mm_process_huge_page_single_page_cycles;
 
 extern struct mm_hist mm_econ_cost;
 extern struct mm_hist mm_econ_benefit;
+
+///////////////////////////////////////////////////////////////////////////////
+// Page fault tracing.
+
+typedef u64 mm_stats_bitflags_t;
+
+struct mm_stats_pftrace {
+	// A bunch of bitflags indicating things that happened during this #PF.
+	// See `mm_econ_flags` for more info.
+	mm_stats_bitflags_t bitflags;
+
+	// The start and end TSC of the #PF.
+	u64 start_tsc;
+	u64 end_tsc;
+
+	// Timestamps at which the #PF did the following:
+	u64 alloc_start_tsc; // started allocating memory
+	u64 alloc_end_tsc;   // finished allocating memory (or OOMed)
+
+	u64 prep_start_tsc;  // started preparing the alloced mem
+	u64 prep_end_tsc;    // finished ...
+};
+
+// A bunch of bit flags that indicate things that could happen during a #PF.
+//
+// NOTE: Don't forget to update mm_stats_pf_flags_names!
+enum mm_stats_pf_flags {
+	// Set: a huge page was allocated/promoted/mapped.
+	// Clear: a base page was allocated/promoted/mapped.
+	MM_STATS_PF_HUGE_PAGE,
+
+	// Set: attempted and failed to allocate a 2MB page.
+	MM_STATS_PF_HUGE_ALLOC_FAILED,
+
+	// Set: this fault was a BadgerTrap fault.
+	MM_STATS_PF_BADGER_TRAP,
+
+	// NOTE: must be the last value in the enum... not actually a flag.
+	MM_STATS_NUM_FLAGS,
+};
+static_assert(MM_STATS_NUM_FLAGS <= sizeof(mm_stats_bitflags_t) * 8);
+
+// Names of the above flags for printing as text.
+extern char *mm_stats_pf_flags_names[MM_STATS_NUM_FLAGS];
+
+static inline void mm_stats_set_flag(
+		struct mm_stats_pftrace *trace,
+		enum mm_stats_pf_flags flag)
+{
+	trace->bitflags |= 1ull << flag;
+}
+
+static inline void mm_stats_clear_flag(
+		struct mm_stats_pftrace *trace,
+		enum mm_stats_pf_flags flag)
+{
+	trace->bitflags &= ~(1ull << flag);
+}
+
+static inline bool mm_stats_test_flag(
+		struct mm_stats_pftrace *trace,
+		enum mm_stats_pf_flags flag)
+{
+	return !!(trace->bitflags & (1ull << flag));
+}
+
+// Initialize the given struct.
+void mm_stats_pftrace_init(struct mm_stats_pftrace *trace);
+
+// Registers a complete sample with the sampling system after it is complete
+// (i.e. at the end of a page fault). The sampling system may then choose to
+// store or drop the sample probablistically.
+void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace);
 
 #endif

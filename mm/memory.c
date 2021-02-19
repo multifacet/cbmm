@@ -4389,7 +4389,8 @@ static int transparent_fake_fault(struct vm_fault *vmf)
  * return value.  See filemap_fault() and __lock_page_or_retry().
  */
 static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
-		unsigned long address, unsigned int flags)
+		unsigned long address, unsigned int flags,
+		struct mm_stats_pftrace *pftrace)
 {
 	struct vm_fault vmf = {
 		.vma = vma,
@@ -4409,6 +4410,8 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	bool should_do;
 
 	// (markm) cr3->pgd->p4d->pud->pmd->pt->page
+
+	// TODO(markm): pftrace this whole thing...
 
 	pgd = pgd_offset(mm, address);
 	p4d = p4d_alloc(mm, pgd, address);
@@ -4593,7 +4596,7 @@ retry_pud:
  * return value.  See filemap_fault() and __lock_page_or_retry().
  */
 vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
-		unsigned int flags)
+		unsigned int flags, struct mm_stats_pftrace *pftrace)
 {
 	vm_fault_t ret;
 
@@ -4623,9 +4626,10 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 	}
 
 	if (unlikely(is_vm_hugetlb_page(vma)))
+		// TODO(markm): maybe eventually instrument this with pftrace?
 		ret = hugetlb_fault(vma->vm_mm, vma, address, flags);
 	else
-		ret = __handle_mm_fault(vma, address, flags);
+		ret = __handle_mm_fault(vma, address, flags, pftrace);
 
 	if (vma->vm_mm) {
 		up_read(&vma->vm_mm->badger_trap_page_table_sem);
