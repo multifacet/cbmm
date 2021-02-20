@@ -17,6 +17,7 @@
 #include <linux/wait.h>
 #include <linux/pci.h>
 #include <linux/gfp.h>
+#include <linux/mm_stats.h>
 
 #include "amd_iommu_types.h"
 #include "amd_iommu_proto.h"
@@ -478,7 +479,7 @@ static void do_fault(struct work_struct *work)
 	struct mm_struct *mm;
 	u64 address;
 	struct mm_stats_pftrace pftrace; // dummy, not used
-	mm_stats_pftrace_init(&pftrace);
+	memset(&pftrace, 0, sizeof(pftrace));
 
 	mm = fault->state->mm;
 	address = fault->address;

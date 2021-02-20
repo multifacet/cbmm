@@ -38,6 +38,7 @@
 #include <linux/freezer.h>
 #include <linux/oom.h>
 #include <linux/numa.h>
+#include <linux/mm_stats.h>
 
 #include <asm/tlbflush.h>
 #include "internal.h"
