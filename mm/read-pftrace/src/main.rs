@@ -1,9 +1,11 @@
 //! Reads traces in binary form produced by the pftrace mechanism.
 
+use std::collections::BTreeMap;
+
 /// ```c
 /// typedef u64 mm_stats_bitflags_t;
 /// ```
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(transparent)]
 struct MMStatsBitflags(u64);
 
@@ -41,7 +43,7 @@ struct MMStatsPftrace {
 
 macro_rules! with_stringify {
     (enum $name:ident { $($variant:ident),+ $(,)? }) => {
-        #[allow(non_camel_case_types)]
+        #[allow(non_camel_case_types, dead_code)]
         #[repr(u8)]
         #[derive(Debug, Clone, Copy)]
         enum $name { $($variant),+ }
@@ -151,15 +153,41 @@ fn main() -> std::io::Result<()> {
 }
 
 fn do_work(buf: &[MMStatsPftrace]) {
-    let mut discarded = 0;
+    use hdrhistogram::Histogram;
 
+    // We categorize events by their bitflags.
+    let mut categorized: BTreeMap<_, Histogram<u64>> = BTreeMap::new();
     for trace in buf {
-        // Sanity checking...
-        if trace.end_tsc <= trace.start_tsc {
-            discarded += 1;
-            continue;
-        }
+        categorized
+            .entry(trace.bitflags)
+            .or_insert(Histogram::new(5).unwrap())
+            .record(trace.end_tsc - trace.start_tsc)
+            .unwrap();
+    }
 
+    for (flags, hist) in categorized.into_iter() {
+        println!(
+            "{:4X}: {}",
+            flags.0,
+            flags
+                .flags()
+                .iter()
+                .map(MMStatsPftraceFlags::name)
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+
+        const QUANTILES: &[f64] = &[0.0, 0.25, 0.5, 0.75, 1.0];
+
+        print!("\t");
+        for (p, v) in QUANTILES.iter().map(|p| (*p, hist.value_at_quantile(*p))) {
+            print!(" P{:.0}={}", p * 100.0, v);
+        }
+        println!();
+    }
+
+    /*
+    for trace in buf {
         println!(
             "total={:10} bits={:4X} {}",
             trace.end_tsc - trace.start_tsc,
@@ -173,6 +201,7 @@ fn do_work(buf: &[MMStatsPftrace]) {
                 .join(" ")
         );
     }
+    */
 
-    println!("------\nTotal: {}\nDiscarded: {}", buf.len(), discarded);
+    println!("------\nTotal: {}", buf.len());
 }
