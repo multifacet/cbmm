@@ -41,6 +41,8 @@ static int hmm_vma_do_fault(struct mm_walk *walk, unsigned long addr,
 	struct hmm_range *range = hmm_vma_walk->range;
 	struct vm_area_struct *vma = walk->vma;
 	vm_fault_t ret;
+	struct mm_stats_pftrace pftrace; // dummy, not used
+	mm_stats_pftrace_init(&pftrace);
 
 	if (!vma)
 		goto err;
@@ -50,7 +52,7 @@ static int hmm_vma_do_fault(struct mm_walk *walk, unsigned long addr,
 	if (write_fault)
 		flags |= FAULT_FLAG_WRITE;
 
-	ret = handle_mm_fault(vma, addr, flags);
+	ret = handle_mm_fault(vma, addr, flags, &pftrace);
 	if (ret & VM_FAULT_RETRY) {
 		/* Note, handle_mm_fault did up_read(&mm->mmap_sem)) */
 		return -EAGAIN;

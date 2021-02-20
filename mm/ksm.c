@@ -471,6 +471,8 @@ static int break_ksm(struct vm_area_struct *vma, unsigned long addr)
 {
 	struct page *page;
 	vm_fault_t ret = 0;
+	struct mm_stats_pftrace pftrace; // dummy, not used
+	mm_stats_pftrace_init(&pftrace);
 
 	do {
 		cond_resched();
@@ -480,7 +482,8 @@ static int break_ksm(struct vm_area_struct *vma, unsigned long addr)
 			break;
 		if (PageKsm(page))
 			ret = handle_mm_fault(vma, addr,
-					FAULT_FLAG_WRITE | FAULT_FLAG_REMOTE);
+					FAULT_FLAG_WRITE | FAULT_FLAG_REMOTE,
+					&pftrace);
 		else
 			ret = VM_FAULT_WRITE;
 		put_page(page);
