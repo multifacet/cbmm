@@ -1222,7 +1222,8 @@ static bool set_huge_zero_page(pgtable_t pgtable, struct mm_struct *mm,
 	return true;
 }
 
-vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf)
+vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf,
+				      struct mm_stats_pftrace *pftrace)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	gfp_t gfp;
@@ -1273,15 +1274,18 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf)
 			spin_unlock(vmf->ptl);
 		if (!set)
 			pte_free(vma->vm_mm, pgtable);
-		else
+		else {
+			mm_stats_set_flag(pftrace, MM_STATS_PF_ZERO);
 			mm_stats_hist_measure(
 				&mm_huge_page_fault_zero_page_cycles,
 				rdtsc() - start);
+		}
 		return ret;
 	}
 	gfp = alloc_hugepage_direct_gfpmask(vma, haddr);
 	page = alloc_hugepage_vma(gfp, vma, haddr, HPAGE_PMD_ORDER);
 	if (unlikely(!page)) {
+		mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_ALLOC_FAILED);
 		count_vm_event(THP_FAULT_FALLBACK);
 		return VM_FAULT_FALLBACK;
 	}
@@ -1849,7 +1853,8 @@ out_free_pages:
 	goto out;
 }
 
-vm_fault_t do_huge_pmd_wp_page(struct vm_fault *vmf, pmd_t orig_pmd)
+vm_fault_t do_huge_pmd_wp_page(struct vm_fault *vmf, pmd_t orig_pmd,
+			       struct mm_stats_pftrace *pftrace)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct page *page = NULL, *new_page;
@@ -1904,6 +1909,9 @@ alloc:
 	    !transparent_hugepage_debug_cow()) {
 		huge_gfp = alloc_hugepage_direct_gfpmask(vma, haddr);
 		new_page = alloc_hugepage_vma(huge_gfp, vma, haddr, HPAGE_PMD_ORDER);
+		if (unlikely(!new_page)) {
+			mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_ALLOC_FAILED);
+		}
 	} else
 		new_page = NULL;
 
@@ -1912,11 +1920,13 @@ alloc:
 	} else {
 		if (!page) {
 			split_huge_pmd(vma, vmf->pmd, vmf->address);
+			mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_SPLIT);
 			ret |= VM_FAULT_FALLBACK;
 		} else {
 			ret = do_huge_pmd_wp_page_fallback(vmf, orig_pmd, page);
 			if (ret & VM_FAULT_OOM) {
 				split_huge_pmd(vma, vmf->pmd, vmf->address);
+				mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_SPLIT);
 				ret |= VM_FAULT_FALLBACK;
 			}
 			put_page(page);
@@ -1929,6 +1939,7 @@ alloc:
 					huge_gfp, &memcg, true))) {
 		put_page(new_page);
 		split_huge_pmd(vma, vmf->pmd, vmf->address);
+		mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_SPLIT);
 		if (page)
 			put_page(page);
 		ret |= VM_FAULT_FALLBACK;

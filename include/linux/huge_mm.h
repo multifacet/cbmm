@@ -7,7 +7,13 @@
 
 #include <linux/fs.h> /* only for vma_is_dax() */
 
-extern vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf);
+// This struct is defined in linux/mm_stats.h, but I don't want to include it
+// here because means any change to that header would require recompiling a
+// bunch of the kernel.
+struct mm_stats_pftrace;
+
+extern vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf,
+					     struct mm_stats_pftrace *pftrace);
 extern int copy_huge_pmd(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 			 pmd_t *dst_pmd, pmd_t *src_pmd, unsigned long addr,
 			 struct vm_area_struct *vma);
@@ -24,7 +30,8 @@ static inline void huge_pud_set_accessed(struct vm_fault *vmf, pud_t orig_pud)
 }
 #endif
 
-extern vm_fault_t do_huge_pmd_wp_page(struct vm_fault *vmf, pmd_t orig_pmd);
+extern vm_fault_t do_huge_pmd_wp_page(struct vm_fault *vmf, pmd_t orig_pmd,
+				      struct mm_stats_pftrace *pftrace);
 extern struct page *follow_trans_huge_pmd(struct vm_area_struct *vma,
 					  unsigned long addr,
 					  pmd_t *pmd,
@@ -97,10 +104,6 @@ extern char huge_addr_comm[MAX_HUGE_ADDR_COMM];
 
 bool huge_addr_enabled(struct vm_area_struct *vma, unsigned long address);
 
-// This struct is defined in linux/mm_stats.h, but I don't want to include it
-// here because means any change to that header would require recompiling a
-// bunch of the kernel.
-struct mm_stats_pftrace;
 int promote_to_huge(struct mm_struct *mm,
 		struct vm_area_struct *vma,
 		unsigned long address,

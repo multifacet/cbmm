@@ -3213,7 +3213,8 @@ out_release:
  * but allow concurrent faults), and pte mapped but not yet locked.
  * We return with mmap_sem still held, but pte unmapped and unlocked.
  */
-static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
+static vm_fault_t do_anonymous_page(struct vm_fault *vmf,
+				    struct mm_stats_pftrace *pftrace)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct mem_cgroup *memcg;
@@ -3245,6 +3246,7 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	/* Use the zero-page for reads */
 	if (!(vmf->flags & FAULT_FLAG_WRITE) &&
 			!mm_forbids_zeropage(vma->vm_mm)) {
+		mm_stats_set_flag(pftrace, MM_STATS_PF_ZERO);
 		entry = pte_mkspecial(pfn_pte(my_zero_pfn(vmf->address),
 						vma->vm_page_prot));
 		vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd,
@@ -4016,26 +4018,29 @@ out:
 	return 0;
 }
 
-static inline vm_fault_t create_huge_pmd(struct vm_fault *vmf)
+static inline vm_fault_t create_huge_pmd(struct vm_fault *vmf,
+					 struct mm_stats_pftrace *pftrace)
 {
 	if (vma_is_anonymous(vmf->vma))
-		return do_huge_pmd_anonymous_page(vmf);
+		return do_huge_pmd_anonymous_page(vmf, pftrace);
 	if (vmf->vma->vm_ops->huge_fault)
 		return vmf->vma->vm_ops->huge_fault(vmf, PE_SIZE_PMD);
 	return VM_FAULT_FALLBACK;
 }
 
 /* `inline' is required to avoid gcc 4.1.2 build error */
-static inline vm_fault_t wp_huge_pmd(struct vm_fault *vmf, pmd_t orig_pmd)
+static inline vm_fault_t wp_huge_pmd(struct vm_fault *vmf, pmd_t orig_pmd,
+				     struct mm_stats_pftrace *pftrace)
 {
 	if (vma_is_anonymous(vmf->vma))
-		return do_huge_pmd_wp_page(vmf, orig_pmd);
+		return do_huge_pmd_wp_page(vmf, orig_pmd, pftrace);
 	if (vmf->vma->vm_ops->huge_fault)
 		return vmf->vma->vm_ops->huge_fault(vmf, PE_SIZE_PMD);
 
 	/* COW handled on pte level: split pmd */
 	VM_BUG_ON_VMA(vmf->vma->vm_flags & VM_SHARED, vmf->vma);
 	__split_huge_pmd(vmf->vma, vmf->pmd, vmf->address, false, NULL);
+	mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_SPLIT);
 
 	return VM_FAULT_FALLBACK;
 }
@@ -4288,7 +4293,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf,
 
 	if (!vmf->pte) {
 		if (vma_is_anonymous(vmf->vma))
-			return do_anonymous_page(vmf);
+			return do_anonymous_page(vmf, pftrace);
 		else {
 			mm_stats_set_flag(pftrace, MM_STATS_PF_NOT_ANON);
 			return do_fault(vmf);
@@ -4534,7 +4539,7 @@ retry_pud:
                 {
 			mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_PAGE);
 			mm_stats_set_flag(pftrace, MM_STATS_PF_COW);
-			return do_huge_pmd_wp_page(&vmf, orig_pmd);
+			return do_huge_pmd_wp_page(&vmf, orig_pmd, pftrace);
                 }
                 if (is_pmd_reserved(orig_pmd) && pmd_present(orig_pmd))
                 {
@@ -4575,7 +4580,7 @@ retry_pud:
 		should_do = mm_decide(&mm_cost_delta);
 
 		if (should_do) {
-			ret = create_huge_pmd(&vmf);
+			ret = create_huge_pmd(&vmf, pftrace);
 			if (!(ret & VM_FAULT_FALLBACK))
 				return ret;
 		}
@@ -4601,7 +4606,7 @@ retry_pud:
 			// TODO(markm): wp_huge_pmd/pud are for huge COW
 			// faults. Should add mm-econ logic here too.
 			if (dirty && !pmd_write(orig_pmd)) {
-				ret = wp_huge_pmd(&vmf, orig_pmd);
+				ret = wp_huge_pmd(&vmf, orig_pmd, pftrace);
 				mm_stats_set_flag(pftrace, MM_STATS_PF_COW);
 				if (!(ret & VM_FAULT_FALLBACK))
 					return ret;

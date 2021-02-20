@@ -81,8 +81,27 @@ enum mm_stats_pf_flags {
 	// file-backed memory region).
 	MM_STATS_PF_NOT_ANON,
 
+	// Set: this fault mapped a zero-page.
+	MM_STATS_PF_ZERO,
+
 	// Set: attempted and failed to allocate a 2MB page.
-	MM_STATS_PF_HUGE_ALLOC_FAILED, // TODO(markm): instrument this everywhere
+	MM_STATS_PF_HUGE_ALLOC_FAILED,
+
+	// Set: a huge page was split.
+	MM_STATS_PF_HUGE_SPLIT,
+
+	// Set: an address range was promoted to a huge page (as opposed to
+	// freshly created as a huge page).
+	MM_STATS_PF_HUGE_PROMOTION,
+
+	// Set: we attempted to do a promotion and failed.
+	MM_STATS_PF_HUGE_PROMOTION_FAILED,
+
+	// Set: page contents were copied during promotion.
+	MM_STATS_PF_HUGE_COPY,
+
+	// Set: when a page zeroed.
+	MM_STATS_PF_HUGE_ZEROED, // TODO: for now only set when page is zeroed during promotion, not during the alloc of a huge page
 
 	// NOTE: must be the last value in the enum... not actually a flag.
 	MM_STATS_NUM_FLAGS,

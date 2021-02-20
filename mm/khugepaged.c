@@ -622,7 +622,8 @@ out:
 static void __collapse_huge_page_copy(pte_t *pte, struct page *page,
 				      struct vm_area_struct *vma,
 				      unsigned long address,
-				      spinlock_t *ptl)
+				      spinlock_t *ptl,
+				      struct mm_stats_pftrace *pftrace)
 {
 	u64 start = rdtsc();
 	pte_t *_pte;
@@ -632,6 +633,7 @@ static void __collapse_huge_page_copy(pte_t *pte, struct page *page,
 		struct page *src_page;
 
 		if (pte_none(pteval) || is_zero_pfn(pte_pfn(pteval))) {
+			mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_ZEROED);
 			clear_user_highpage(page, address);
 			add_mm_counter(vma->vm_mm, MM_ANONPAGES, 1);
 			if (is_zero_pfn(pte_pfn(pteval))) {
@@ -647,6 +649,7 @@ static void __collapse_huge_page_copy(pte_t *pte, struct page *page,
 				spin_unlock(ptl);
 			}
 		} else {
+			mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_COPY);
 			src_page = pte_page(pteval);
 			copy_user_highpage(page, src_page, address, vma);
 			VM_BUG_ON_PAGE(page_mapcount(src_page) != 1, src_page);
@@ -871,7 +874,8 @@ static int hugepage_vma_revalidate(struct mm_struct *mm, unsigned long address,
 static bool __collapse_huge_page_swapin(struct mm_struct *mm,
 					struct vm_area_struct *vma,
 					unsigned long address, pmd_t *pmd,
-					int referenced, bool force)
+					int referenced, bool force,
+					struct mm_stats_pftrace *pftrace)
 {
 	int swapped_in = 0;
 	vm_fault_t ret = 0;
@@ -903,6 +907,8 @@ static bool __collapse_huge_page_swapin(struct mm_struct *mm,
 		up_read(&mm->badger_trap_page_table_sem);
 
 		ret = do_swap_page(&vmf);
+
+		mm_stats_set_flag(pftrace, MM_STATS_PF_SWAP);
 
 		/* do_swap_page returns VM_FAULT_RETRY with released mmap_sem */
 		if (ret & VM_FAULT_RETRY) {
@@ -936,7 +942,8 @@ static int collapse_huge_page(struct mm_struct *mm,
 				   unsigned long address,
 				   struct page **hpage,
 				   int node, int referenced,
-				   bool force)
+				   bool force,
+				   struct mm_stats_pftrace *pftrace)
 {
 	pmd_t *pmd, _pmd;
 	pte_t *pte;
@@ -965,6 +972,7 @@ static int collapse_huge_page(struct mm_struct *mm,
 	up_read(&mm->mmap_sem);
 	new_page = khugepaged_alloc_page(hpage, gfp, node);
 	if (!new_page) {
+		mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_ALLOC_FAILED);
 		result = SCAN_ALLOC_HUGE_PAGE_FAIL;
 		goto out_nolock;
 	}
@@ -1000,7 +1008,7 @@ static int collapse_huge_page(struct mm_struct *mm,
 	 * If it fails, we release mmap_sem and jump out_nolock.
 	 * Continuing to collapse causes inconsistency.
 	 */
-	if (!__collapse_huge_page_swapin(mm, vma, address, pmd, referenced, force)) {
+	if (!__collapse_huge_page_swapin(mm, vma, address, pmd, referenced, force, pftrace)) {
 		mem_cgroup_cancel_charge(new_page, memcg, true);
 		up_read(&mm->badger_trap_page_table_sem);
 		up_read(&mm->mmap_sem);
@@ -1073,7 +1081,7 @@ static int collapse_huge_page(struct mm_struct *mm,
 	 */
 	anon_vma_unlock_write(vma->anon_vma);
 
-	__collapse_huge_page_copy(pte, new_page, vma, address, pte_ptl);
+	__collapse_huge_page_copy(pte, new_page, vma, address, pte_ptl, pftrace);
 	pte_unmap(pte);
 	__SetPageUptodate(new_page);
 	pgtable = pmd_pgtable(_pmd);
@@ -1146,6 +1154,8 @@ static int khugepaged_scan_pmd(struct mm_struct *mm,
 	struct mm_cost_delta mm_cost_delta;
 	struct mm_action mm_action;
 	bool should_do;
+	struct mm_stats_pftrace pftrace; // dummy, not used
+	mm_stats_pftrace_init(&pftrace);
 
 	VM_BUG_ON(address & ~HPAGE_PMD_MASK);
 
@@ -1260,7 +1270,7 @@ out_unmap:
 			node = khugepaged_find_target_node();
 			/* collapse_huge_page will return with the mmap_sem released */
 			collapse_huge_page(mm, address, hpage, node, referenced,
-					/* force */ false);
+					/* force */ false, &pftrace);
 		} else {
 			up_read(&mm->badger_trap_page_table_sem);
 			up_read(&mm->mmap_sem);
@@ -1298,7 +1308,8 @@ promote_to_huge(struct mm_struct *mm,
 	down_read(&mm->badger_trap_page_table_sem);
 
 	node = khugepaged_find_target_node();
-	result = collapse_huge_page(mm, address, &hpage, node, 512, /* force */ true);
+	result = collapse_huge_page(mm, address, &hpage, node, 512,
+			/* force */ true, pftrace);
 
 	if (IS_ERR_OR_NULL(hpage)) {
 		pr_warn("hpage is null or error");
@@ -1308,6 +1319,12 @@ promote_to_huge(struct mm_struct *mm,
 
 	pr_info("Attempted to promote %lx: result=%d hpage=%p",
 			address, result, hpage);
+
+	if (result == SCAN_SUCCEED) {
+		mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_PROMOTION);
+	} else {
+		mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_PROMOTION_FAILED);
+	}
 
 	return result;
 }
