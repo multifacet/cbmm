@@ -343,7 +343,7 @@ MM_STATS_PROC_CREATE_INT(int, pftrace_enable, 0, "%d")
 // This is the pftrace file, found at "/pftrace". We also keep track of the
 // file offset for writes and the number of writes so far so we can batch
 // fsyncing.
-#define MM_STATS_PFTRACE_FNAME "pftrace"
+#define MM_STATS_PFTRACE_FNAME "/pftrace"
 static struct file *pftrace_file = NULL;
 static loff_t pftrace_pos = 0;
 static long pftrace_nwrites = 0;
@@ -368,7 +368,7 @@ static inline int open_pftrace_file(void) {
 
     pftrace_file = file;
 
-    pr_warn("mm_stats: Successfully opened /%s\n", MM_STATS_PFTRACE_FNAME);
+    pr_warn("mm_stats: Successfully opened %s\n", MM_STATS_PFTRACE_FNAME);
     return 0;
 }
 
