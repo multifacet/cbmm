@@ -6,6 +6,7 @@
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
 #include <linux/fs.h>
+#include <linux/hashtable.h>
 
 #define MM_STATS_INSTR_BUFSIZE 24
 
@@ -348,6 +349,91 @@ static struct file *pftrace_file = NULL;
 static loff_t pftrace_pos = 0;
 static long pftrace_nwrites = 0;
 
+// Keep counts of the number of rejected sample for different sets of bitflags.
+// This helps us figure out what part of the tail our samples are.
+#define REJECTED_HASH_BITS 5
+static DEFINE_HASHTABLE(pftrace_rejected_samples, REJECTED_HASH_BITS);
+
+struct rejected_hash_node {
+    struct hlist_node node;
+    mm_stats_bitflags_t bitflags;
+    u64 count;
+};
+
+// Output the rejected sample count to a procfs file.
+static struct proc_dir_entry *rejected_hash_ent;
+static ssize_t rejected_hash_read_cb(
+        struct file *file, char __user *ubuf,size_t count, loff_t *ppos)
+{
+    ssize_t len = 0;
+    int bkt;
+    struct rejected_hash_node *node;
+    char *buf = (char *)vmalloc(count);
+    if (!buf) {
+        pr_warn("mm_stats: Unable to allocate rejected string buffer.");
+        return -ENOMEM;
+    }
+
+    hash_for_each(pftrace_rejected_samples, bkt, node, node)
+    {
+        len += sprintf(buf, "%llx:%llu ",
+                node->bitflags, node->count);
+    }
+    buf[len++] = '\0';
+
+    if(count < len) {
+        vfree(buf);
+        return 0;
+    }
+
+    if(copy_to_user(ubuf, buf, len)) {
+        vfree(buf);
+        return -EFAULT;
+    }
+
+    vfree(buf);
+
+    *ppos = len;
+    return len;
+}
+
+static struct file_operations rejected_hash_ops =
+{
+    .read = rejected_hash_read_cb,
+};
+
+
+static inline void rejected_sample(struct mm_stats_pftrace *trace)
+{
+    u32 hash = hash_64(trace->bitflags, REJECTED_HASH_BITS);
+    struct rejected_hash_node *node = NULL;
+    bool found = false;
+
+    // Look for existing entry.
+    hash_for_each_possible(pftrace_rejected_samples, node, node, hash)
+    {
+        if (trace->bitflags == node->bitflags) {
+            found = true;
+            break;
+        }
+    }
+
+    // If not found, insert.
+    if (!found) {
+        node = (struct rejected_hash_node *)vzalloc(sizeof(struct rejected_hash_node));
+        if (!node) {
+            pr_err("mm_stats: unable to alloc rejected_hash_node. skipping.");
+            return;
+        }
+
+        node->bitflags = trace->bitflags;
+        node->count = 0;
+    }
+
+    // Increase the count;
+    node->count += 1;
+}
+
 static inline int open_pftrace_file(void) {
     struct file *file;
     long err;
@@ -389,6 +475,7 @@ void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
     // Filter out some events.
     // TODO: more complex filter...
     if (trace->end_tsc - trace->start_tsc < PFTHRESHOLD) {
+        rejected_sample(trace);
         return;
     }
 
@@ -485,6 +572,9 @@ MM_STATS_PROC_CREATE_HIST(mm_econ_benefit);
 void mm_stats_init(void)
 {
     MM_STATS_INIT_INT(pftrace_enable);
+    hash_init(pftrace_rejected_samples);
+    rejected_hash_ent = proc_create("pftrace_rejected",
+            0444, NULL, &rejected_hash_ops);
 
     MM_STATS_INIT_HIST(mm_base_page_fault_cycles);
     MM_STATS_INIT_HIST(mm_huge_page_fault_cycles);
