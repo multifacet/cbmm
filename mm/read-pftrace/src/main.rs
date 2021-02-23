@@ -165,7 +165,7 @@ fn do_work(buf: &[MMStatsPftrace]) {
             .unwrap();
     }
 
-    for (flags, hist) in categorized.into_iter() {
+    for (flags, hist) in categorized.iter() {
         println!(
             "{:4X}: {}",
             flags.0,
@@ -183,7 +183,30 @@ fn do_work(buf: &[MMStatsPftrace]) {
         for (p, v) in QUANTILES.iter().map(|p| (*p, hist.value_at_quantile(*p))) {
             print!(" P{:.0}={}", p * 100.0, v);
         }
-        println!();
+        println!(" N={}", hist.len());
+    }
+
+    println!("------\nTotal: {}", buf.len());
+
+    // Print for plotting...
+    for (flags, hist) in categorized.iter() {
+        let flags = {
+            let flags = flags
+                .flags()
+                .iter()
+                .map(MMStatsPftraceFlags::name)
+                .collect::<Vec<_>>()
+                .join(",");
+            if flags.is_empty() {
+                "none".into()
+            } else {
+                flags
+            }
+        };
+        print!(" {}({})", flags, hist.len());
+        for v in (0..=100).map(|p| hist.value_at_quantile((p as f64) / 100.)) {
+            print!(" {}", v);
+        }
     }
 
     /*
@@ -202,6 +225,4 @@ fn do_work(buf: &[MMStatsPftrace]) {
         );
     }
     */
-
-    println!("------\nTotal: {}", buf.len());
 }
