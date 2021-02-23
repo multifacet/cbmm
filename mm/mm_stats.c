@@ -379,7 +379,7 @@ void mm_stats_pftrace_init(struct mm_stats_pftrace *trace)
 
 void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
 {
-    const u64 PFTHRESHOLD = 1000 * 0; // ~100us TODO: adjust this... for now accept all
+    const u64 PFTHRESHOLD = 1000 * 50; // ~100us TODO: adjust this... for now accept all
     long err;
     ssize_t total_written = 0, written;
 
