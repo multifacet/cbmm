@@ -368,7 +368,12 @@ static ssize_t rejected_hash_read_cb(
     ssize_t len = 0;
     int bkt;
     struct rejected_hash_node *node;
-    char *buf = (char *)vmalloc(count);
+    char *buf;
+
+    if(*ppos > 0)
+        return 0;
+
+    buf = (char *)vmalloc(count);
     if (!buf) {
         pr_warn("mm_stats: Unable to allocate rejected string buffer.");
         return -ENOMEM;
@@ -376,7 +381,7 @@ static ssize_t rejected_hash_read_cb(
 
     hash_for_each(pftrace_rejected_samples, bkt, node, node)
     {
-        len += sprintf(buf, "%llx:%llu ",
+        len += sprintf(&buf[len], "%llx:%llu ",
                 node->bitflags, node->count);
     }
     buf[len++] = '\0';
@@ -405,12 +410,11 @@ static struct file_operations rejected_hash_ops =
 
 static inline void rejected_sample(struct mm_stats_pftrace *trace)
 {
-    u32 hash = hash_64(trace->bitflags, REJECTED_HASH_BITS);
     struct rejected_hash_node *node = NULL;
     bool found = false;
 
     // Look for existing entry.
-    hash_for_each_possible(pftrace_rejected_samples, node, node, hash)
+    hash_for_each_possible(pftrace_rejected_samples, node, node, trace->bitflags)
     {
         if (trace->bitflags == node->bitflags) {
             found = true;
@@ -428,6 +432,8 @@ static inline void rejected_sample(struct mm_stats_pftrace *trace)
 
         node->bitflags = trace->bitflags;
         node->count = 0;
+
+        hash_add(pftrace_rejected_samples, &node->node, node->bitflags);
     }
 
     // Increase the count;
