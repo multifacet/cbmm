@@ -1282,8 +1282,10 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 		}
 		return ret;
 	}
+	pftrace->alloc_start_tsc = rdtsc();
 	gfp = alloc_hugepage_direct_gfpmask(vma, haddr);
 	page = alloc_hugepage_vma(gfp, vma, haddr, HPAGE_PMD_ORDER);
+	pftrace->alloc_end_tsc = rdtsc();
 	if (unlikely(!page)) {
 		mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_ALLOC_FAILED);
 		count_vm_event(THP_FAULT_FALLBACK);
@@ -1907,8 +1909,10 @@ vm_fault_t do_huge_pmd_wp_page(struct vm_fault *vmf, pmd_t orig_pmd,
 alloc:
 	if (__transparent_hugepage_enabled(vma, vmf->address) &&
 	    !transparent_hugepage_debug_cow()) {
+		pftrace->alloc_start_tsc = rdtsc();
 		huge_gfp = alloc_hugepage_direct_gfpmask(vma, haddr);
 		new_page = alloc_hugepage_vma(huge_gfp, vma, haddr, HPAGE_PMD_ORDER);
+		pftrace->alloc_end_tsc = rdtsc();
 		if (unlikely(!new_page)) {
 			mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_ALLOC_FAILED);
 		}
@@ -1950,11 +1954,13 @@ alloc:
 	count_vm_event(THP_FAULT_ALLOC);
 	count_memcg_events(memcg, THP_FAULT_ALLOC, 1);
 
+	pftrace->prep_start_tsc = rdtsc();
 	if (!page)
 		clear_huge_page(new_page, vmf->address, HPAGE_PMD_NR);
 	else
 		copy_user_huge_page(new_page, page, vmf->address,
 				    vma, HPAGE_PMD_NR);
+	pftrace->prep_end_tsc = rdtsc();
 	__SetPageUptodate(new_page);
 
 	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, vma, vma->vm_mm,
