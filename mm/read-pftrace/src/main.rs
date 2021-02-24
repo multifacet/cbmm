@@ -137,8 +137,15 @@ impl MMStatsBitflags {
 }
 
 fn main() -> std::io::Result<()> {
-    let fname = std::env::args().skip(1).next().expect("Expected file name");
-    let buf = std::fs::read(fname)?;
+    let mut args = std::env::args().skip(1);
+    let pftrace_fname = args.next().expect("Expected file name");
+    let rejected_fname = args.next().expect("Expected file name");
+    let threshold = args
+        .next()
+        .expect("Expected threshold")
+        .parse::<u64>()
+        .expect("not an integer");
+    let buf = std::fs::read(pftrace_fname)?;
     let buf: &[MMStatsPftrace] = unsafe {
         assert!(buf.len() % std::mem::size_of::<MMStatsPftrace>() == 0);
         let (pre, aligned, post) = buf.as_slice().align_to();
@@ -147,12 +154,28 @@ fn main() -> std::io::Result<()> {
         aligned
     };
 
-    do_work(&buf);
+    let rejected = std::fs::read_to_string(rejected_fname)?
+        .trim_end_matches('\u{0}')
+        .trim()
+        .split(' ')
+        .map(|part| {
+            let mut iter = part.split(':');
+            (iter.next().unwrap(), iter.next().unwrap())
+        })
+        .map(|(bits, count)| {
+            (
+                MMStatsBitflags(bits.parse::<u64>().expect("not an integer")),
+                count.parse::<u64>().expect("not an integer"),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    do_work(&buf, &rejected, threshold);
 
     Ok(())
 }
 
-fn do_work(buf: &[MMStatsPftrace]) {
+fn do_work(buf: &[MMStatsPftrace], rejected: &[(MMStatsBitflags, u64)], threshold: u64) {
     use hdrhistogram::Histogram;
 
     // We categorize events by their bitflags.
@@ -165,6 +188,16 @@ fn do_work(buf: &[MMStatsPftrace]) {
             .unwrap();
     }
 
+    // Adjust for the rejected samples.
+    for (bitflags, rejected_count) in rejected {
+        categorized
+            .entry(*bitflags)
+            .or_insert(Histogram::new(5).unwrap())
+            .record_n(threshold, *rejected_count)
+            .unwrap();
+    }
+
+    // Print output.
     for (flags, hist) in categorized.iter() {
         println!(
             "{:4X}: {}",
