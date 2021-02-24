@@ -222,7 +222,12 @@ fn do_work(buf: &[MMStatsPftrace], rejected: &[(MMStatsBitflags, u64)], threshol
     println!("------\nTotal: {}", buf.len());
 
     // Print for plotting...
-    for (flags, hist) in categorized.iter() {
+    //
+    // For the sake of plotting, we sort by the number of events.
+    let mut keys = categorized.keys().collect::<Vec<_>>();
+    keys.sort_by_key(|flags| categorized.get(flags).unwrap().len());
+    for flags in keys.iter() {
+        let hist = categorized.get(flags).unwrap();
         let flags = {
             let flags = flags
                 .flags()
