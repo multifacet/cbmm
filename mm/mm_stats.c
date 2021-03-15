@@ -5,6 +5,7 @@
 #include <linux/mm_stats.h>
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
+#include <linux/slab.h>
 #include <linux/fs.h>
 #include <linux/hashtable.h>
 
@@ -425,7 +426,11 @@ static inline void rejected_sample(struct mm_stats_pftrace *trace)
 
     // If not found, insert.
     if (!found) {
-        node = (struct rejected_hash_node *)vzalloc(sizeof(struct rejected_hash_node));
+        node = (struct rejected_hash_node *)kmalloc(
+                sizeof(struct rejected_hash_node),
+                // We pass __GFP_ATOMIC because this may occur in an interrupt
+                // context, which doesn't allow sleeping.
+                GFP_KERNEL | __GFP_ZERO | __GFP_ATOMIC);
         if (!node) {
             pr_err("mm_stats: unable to alloc rejected_hash_node. skipping.");
             return;
