@@ -2537,7 +2537,8 @@ static inline void wp_page_reuse(struct vm_fault *vmf)
  *   held to the old page, as well as updating the rmap.
  * - In any case, unlock the PTL and drop the reference we took to the old page.
  */
-static vm_fault_t wp_page_copy(struct vm_fault *vmf)
+static vm_fault_t wp_page_copy(struct vm_fault *vmf,
+			       struct mm_stats_pftrace *pftrace)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct mm_struct *mm = vma->vm_mm;
@@ -2554,11 +2555,15 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 	if (is_zero_pfn(pte_pfn(vmf->orig_pte))) {
 		new_page = alloc_zeroed_user_highpage_movable(vma,
 							      vmf->address);
+		mm_stats_check_alloc_fallback(pftrace);
+		mm_stats_check_alloc_zeroing(pftrace);
 		if (!new_page)
 			goto oom;
 	} else {
 		new_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma,
 				vmf->address);
+		mm_stats_check_alloc_fallback(pftrace);
+		mm_stats_check_alloc_zeroing(pftrace);
 		if (!new_page)
 			goto oom;
 
@@ -2799,7 +2804,8 @@ static vm_fault_t wp_page_shared(struct vm_fault *vmf)
  * but allow concurrent faults), with pte both mapped and locked.
  * We return with mmap_sem still held, but pte unmapped and unlocked.
  */
-static vm_fault_t do_wp_page(struct vm_fault *vmf)
+static vm_fault_t do_wp_page(struct vm_fault *vmf,
+			     struct mm_stats_pftrace *pftrace)
 	__releases(vmf->ptl)
 {
 	struct vm_area_struct *vma = vmf->vma;
@@ -2818,7 +2824,7 @@ static vm_fault_t do_wp_page(struct vm_fault *vmf)
 			return wp_pfn_shared(vmf);
 
 		pte_unmap_unlock(vmf->pte, vmf->ptl);
-		return wp_page_copy(vmf);
+		return wp_page_copy(vmf, pftrace);
 	}
 
 	/*
@@ -2880,7 +2886,7 @@ copy:
 	get_page(vmf->page);
 
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
-	return wp_page_copy(vmf);
+	return wp_page_copy(vmf, pftrace);
 }
 
 static void unmap_mapping_range_vma(struct vm_area_struct *vma,
@@ -2987,7 +2993,8 @@ EXPORT_SYMBOL(unmap_mapping_range);
  * We return with the mmap_sem locked or unlocked in the same cases
  * as does filemap_fault().
  */
-vm_fault_t do_swap_page(struct vm_fault *vmf)
+vm_fault_t do_swap_page(struct vm_fault *vmf,
+			struct mm_stats_pftrace *pftrace)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct page *page = NULL, *swapcache;
@@ -3182,7 +3189,7 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 	}
 
 	if (vmf->flags & FAULT_FLAG_WRITE) {
-		ret |= do_wp_page(vmf);
+		ret |= do_wp_page(vmf, pftrace);
 		if (ret & VM_FAULT_ERROR)
 			ret &= VM_FAULT_ERROR;
 		goto out;
@@ -3268,6 +3275,8 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf,
 	if (unlikely(anon_vma_prepare(vma)))
 		goto oom;
 	page = alloc_zeroed_user_highpage_movable(vma, vmf->address);
+	mm_stats_check_alloc_fallback(pftrace);
+	mm_stats_check_alloc_zeroing(pftrace);
 	if (!page)
 		goto oom;
 
@@ -4221,7 +4230,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf,
 			*vmf->pte = pte_unreserve(*vmf->pte);
 			vmf->orig_pte = *vmf->pte;
 
-			ret = do_wp_page(vmf);
+			ret = do_wp_page(vmf, pftrace);
 			// Returns with pte unmapped, unlocked.
 
 			pte_offset_map_lock(vmf->vma->vm_mm, vmf->pmd, vmf->address, &vmf->ptl);
@@ -4302,7 +4311,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf,
 
 	if (!pte_present(vmf->orig_pte)) {
 		mm_stats_set_flag(pftrace, MM_STATS_PF_SWAP);
-		return do_swap_page(vmf);
+		return do_swap_page(vmf, pftrace);
 	}
 
 	if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma)) {
@@ -4318,7 +4327,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf,
 	if (vmf->flags & FAULT_FLAG_WRITE) {
 		if (!pte_write(entry)) {
 			mm_stats_set_flag(pftrace, MM_STATS_PF_COW);
-			return do_wp_page(vmf);
+			return do_wp_page(vmf, pftrace);
 		}
 		entry = pte_mkdirty(entry);
 	}

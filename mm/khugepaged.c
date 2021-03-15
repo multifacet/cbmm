@@ -633,7 +633,7 @@ static void __collapse_huge_page_copy(pte_t *pte, struct page *page,
 		struct page *src_page;
 
 		if (pte_none(pteval) || is_zero_pfn(pte_pfn(pteval))) {
-			mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_ZEROED);
+			mm_stats_set_flag(pftrace, MM_STATS_PF_CLEARED_MEM);
 			clear_user_highpage(page, address);
 			add_mm_counter(vma->vm_mm, MM_ANONPAGES, 1);
 			if (is_zero_pfn(pte_pfn(pteval))) {
@@ -906,7 +906,7 @@ static bool __collapse_huge_page_swapin(struct mm_struct *mm,
 		// properly.
 		up_read(&mm->badger_trap_page_table_sem);
 
-		ret = do_swap_page(&vmf);
+		ret = do_swap_page(&vmf, pftrace);
 
 		mm_stats_set_flag(pftrace, MM_STATS_PF_SWAP);
 

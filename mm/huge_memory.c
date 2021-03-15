@@ -1286,6 +1286,8 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 	gfp = alloc_hugepage_direct_gfpmask(vma, haddr);
 	page = alloc_hugepage_vma(gfp, vma, haddr, HPAGE_PMD_ORDER);
 	pftrace->alloc_end_tsc = rdtsc();
+	mm_stats_check_alloc_fallback(pftrace);
+	mm_stats_check_alloc_zeroing(pftrace);
 	if (unlikely(!page)) {
 		mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_ALLOC_FAILED);
 		count_vm_event(THP_FAULT_FALLBACK);
@@ -1913,6 +1915,8 @@ alloc:
 		huge_gfp = alloc_hugepage_direct_gfpmask(vma, haddr);
 		new_page = alloc_hugepage_vma(huge_gfp, vma, haddr, HPAGE_PMD_ORDER);
 		pftrace->alloc_end_tsc = rdtsc();
+		mm_stats_check_alloc_fallback(pftrace);
+		mm_stats_check_alloc_zeroing(pftrace);
 		if (unlikely(!new_page)) {
 			mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_ALLOC_FAILED);
 		}

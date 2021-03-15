@@ -99,6 +99,14 @@ EXPORT_PER_CPU_SYMBOL(_numa_mem_);
 int _node_numa_mem_[MAX_NUMNODES];
 #endif
 
+// markm: a hacky way to test for alloc fast_path failure on the most recent
+// allocation. This is inherenetly a bit racy, but it's probably good enough
+// because the fast path is fast.
+DEFINE_PER_CPU(bool, pftrace_alloc_fallback);
+// markm: ditto but to check if we zeroed a page and how long it took.
+DEFINE_PER_CPU(bool, pftrace_alloc_zeroed_page);
+DEFINE_PER_CPU(u64, pftrace_alloc_zeroing_duration);
+
 /* work_structs for global per-cpu drains */
 struct pcpu_drain {
 	struct zone *zone;
@@ -1114,9 +1122,13 @@ out:
 static void kernel_init_free_pages(struct page *page, int numpages)
 {
 	int i;
+	u64 start = rdtsc();
 
 	for (i = 0; i < numpages; i++)
 		clear_highpage(page + i);
+
+	get_cpu_var(pftrace_alloc_zeroed_page) = true;
+	get_cpu_var(pftrace_alloc_zeroing_duration) = rdtsc() - start;
 }
 
 static __always_inline bool free_pages_prepare(struct page *page,
@@ -4717,6 +4729,9 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	gfp_t alloc_mask; /* The gfp_t that was actually used for allocation */
 	struct alloc_context ac = { };
 
+	get_cpu_var(pftrace_alloc_fallback) = false;
+	get_cpu_var(pftrace_alloc_zeroed_page) = false;
+
 	/*
 	 * There are several places where we assume that the order value is sane
 	 * so bail out early if the request is out of bound.
@@ -4743,6 +4758,8 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	page = get_page_from_freelist(alloc_mask, order, alloc_flags, &ac);
 	if (likely(page))
 		goto out;
+
+	get_cpu_var(pftrace_alloc_fallback) = true;
 
 	/*
 	 * Apply scoped allocation constraints. This is mainly about GFP_NOFS

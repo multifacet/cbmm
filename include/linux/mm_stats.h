@@ -51,6 +51,11 @@ struct mm_stats_pftrace {
 	// Timestamps at which the #PF did the following:
 	u64 alloc_start_tsc; // started allocating memory
 	u64 alloc_end_tsc;   // finished allocating memory (or OOMed)
+	// In normal linux, this will include the time to zero if GFP_ZERO was
+	// passed to the allocator. Thus, we have another measurement that
+	// includes ONLY THE TIME TO ZERO THE PAGE IN THE ALLOCATOR. This value
+	// is only preset if MM_STATS_PF_CLEARED_MEM is set:
+	u64 alloc_zeroing_duration;
 
 	u64 prep_start_tsc;  // started preparing the alloced mem
 	u64 prep_end_tsc;    // finished ...
@@ -100,8 +105,11 @@ enum mm_stats_pf_flags {
 	// Set: page contents were copied during promotion.
 	MM_STATS_PF_HUGE_COPY,
 
-	// Set: when a page zeroed.
-	MM_STATS_PF_HUGE_ZEROED, // TODO: for now only set when page is zeroed during promotion, not during the alloc of a huge page
+	// Set: when a page is zeroed/cleared.
+	MM_STATS_PF_CLEARED_MEM,
+
+	// Set: the physical memory allocator fell back to the slow path.
+	MM_STATS_PF_ALLOC_FALLBACK,
 
 	// NOTE: must be the last value in the enum... not actually a flag.
 	MM_STATS_NUM_FLAGS,
@@ -110,6 +118,11 @@ static_assert(MM_STATS_NUM_FLAGS <= sizeof(mm_stats_bitflags_t) * 8);
 
 // Names of the above flags for printing as text.
 extern char *mm_stats_pf_flags_names[MM_STATS_NUM_FLAGS];
+
+// Hacky mechanism for determining if last allocation has failed.
+DECLARE_PER_CPU(bool, pftrace_alloc_fallback);
+DECLARE_PER_CPU(bool, pftrace_alloc_zeroed_page);
+DECLARE_PER_CPU(u64, pftrace_alloc_zeroing_duration);
 
 static inline void mm_stats_set_flag(
 		struct mm_stats_pftrace *trace,
@@ -130,6 +143,24 @@ static inline bool mm_stats_test_flag(
 		enum mm_stats_pf_flags flag)
 {
 	return !!(trace->bitflags & (1ull << flag));
+}
+
+static inline void mm_stats_check_alloc_fallback(
+		struct mm_stats_pftrace *trace)
+{
+	if (get_cpu_var(pftrace_alloc_fallback)) {
+		mm_stats_set_flag(trace, MM_STATS_PF_ALLOC_FALLBACK);
+	}
+}
+
+static inline void mm_stats_check_alloc_zeroing(
+		struct mm_stats_pftrace *trace)
+{
+	if (get_cpu_var(pftrace_alloc_zeroed_page)) {
+		mm_stats_set_flag(trace, MM_STATS_PF_ALLOC_FALLBACK);
+		trace->alloc_zeroing_duration =
+			get_cpu_var(pftrace_alloc_zeroing_duration);
+	}
 }
 
 // Initialize the given struct.

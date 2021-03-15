@@ -36,6 +36,7 @@ struct MMStatsPftrace {
 
     alloc_start_tsc: u64,
     alloc_end_tsc: u64,
+    alloc_zeroing_duration: u64,
 
     prep_start_tsc: u64,
     prep_end_tsc: u64,
@@ -108,7 +109,8 @@ with_stringify! {
         MM_STATS_PF_HUGE_PROMOTION,
         MM_STATS_PF_HUGE_PROMOTION_FAILED,
         MM_STATS_PF_HUGE_COPY,
-        MM_STATS_PF_HUGE_ZEROED,
+        MM_STATS_PF_CLEARED_MEM,
+        MM_STATS_PF_ALLOC_FALLBACK,
 
         MM_STATS_NUM_FLAGS,
     }
