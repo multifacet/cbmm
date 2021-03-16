@@ -1055,7 +1055,8 @@ out:
 EXPORT_SYMBOL_GPL(thp_get_unmapped_area);
 
 static vm_fault_t __do_huge_pmd_anonymous_page(struct vm_fault *vmf,
-			struct page *page, gfp_t gfp)
+			struct page *page, gfp_t gfp,
+		        struct mm_stats_pftrace *pftrace)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct mem_cgroup *memcg;
@@ -1077,7 +1078,9 @@ static vm_fault_t __do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 		goto release;
 	}
 
+	pftrace->prep_start_tsc = rdtsc();
 	clear_huge_page(page, vmf->address, HPAGE_PMD_NR);
+	pftrace->prep_end_tsc = rdtsc();
 	/*
 	 * The memory barrier inside __SetPageUptodate makes sure that
 	 * clear_huge_page writes become visible before the set_pmd_at()
@@ -1294,7 +1297,7 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 		return VM_FAULT_FALLBACK;
 	}
 	prep_transhuge_page(page);
-	ret = __do_huge_pmd_anonymous_page(vmf, page, gfp);
+	ret = __do_huge_pmd_anonymous_page(vmf, page, gfp, pftrace);
 
 	mm_stats_hist_measure(&mm_huge_page_fault_create_new_cycles, rdtsc() - start);
 
