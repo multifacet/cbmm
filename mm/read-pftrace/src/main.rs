@@ -38,6 +38,10 @@ struct Config {
         default_value = "duration",
     )]
     data_mode: DataMode,
+
+    /// Only output 1 line of data for use with a plotting script.
+    #[structopt(long)]
+    cli_only: bool,
 }
 
 arg_enum! {
@@ -303,7 +307,9 @@ fn generate_cdfs(
     let categorized = categorize(config, buf, rejected);
 
     // Print output.
-    print_quartiles(&categorized);
+    if !config.cli_only {
+        print_quartiles(&categorized);
+    }
 
     // Print for plotting...
     //
@@ -357,7 +363,9 @@ fn generate_pdfs(
     let categorized = categorize(config, buf, rejected);
 
     // Print output.
-    print_quartiles(&categorized);
+    if !config.cli_only {
+        print_quartiles(&categorized);
+    }
 
     // Print for plotting...
     //
