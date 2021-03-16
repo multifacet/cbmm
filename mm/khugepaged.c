@@ -1081,7 +1081,9 @@ static int collapse_huge_page(struct mm_struct *mm,
 	 */
 	anon_vma_unlock_write(vma->anon_vma);
 
+	pftrace->prep_start_tsc = rdtsc();
 	__collapse_huge_page_copy(pte, new_page, vma, address, pte_ptl, pftrace);
+	pftrace->prep_end_tsc = rdtsc();
 	pte_unmap(pte);
 	__SetPageUptodate(new_page);
 	pgtable = pmd_pgtable(_pmd);
