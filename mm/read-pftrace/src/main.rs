@@ -1,6 +1,54 @@
 //! Reads traces in binary form produced by the pftrace mechanism.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+use clap::arg_enum;
+
+use hdrhistogram::Histogram;
+
+use structopt::StructOpt;
+
+type CategorizedData = BTreeMap<MMStatsBitflags, Histogram<u64>>;
+
+/// Reads pftrace output and dumps useful numbers for plotting.
+#[derive(StructOpt, Debug, Clone)]
+#[structopt(name = "read-pftrace")]
+struct Config {
+    /// The pftrace output file.
+    pftrace_file: PathBuf,
+
+    /// The file with counts of rejected pftrace samples.
+    #[structopt(requires("rejection_threshold"))]
+    rejected_file: Option<PathBuf>,
+
+    /// The threshold below which samples are rejected.
+    #[structopt(requires("rejected_file"))]
+    rejection_threshold: Option<u64>,
+
+    /// Output PDF, rather than CDF.
+    #[structopt(long)]
+    pdf: bool,
+
+    /// Which data to output.
+    #[structopt(
+        long,
+        possible_values = &DataMode::variants(),
+        case_insensitive = true,
+        default_value = "duration",
+    )]
+    data_mode: DataMode,
+}
+
+arg_enum! {
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum DataMode {
+        Duration,
+        AllocTotal,
+        AllocClearing,
+        PrepTotal,
+    }
+}
 
 /// ```c
 /// typedef u64 mm_stats_bitflags_t;
@@ -139,15 +187,29 @@ impl MMStatsBitflags {
 }
 
 fn main() -> std::io::Result<()> {
-    let mut args = std::env::args().skip(1);
-    let pftrace_fname = args.next().expect("Expected file name");
-    let rejected_fname = args.next().expect("Expected file name");
-    let threshold = args
-        .next()
-        .expect("Expected threshold")
-        .parse::<u64>()
-        .expect("not an integer");
-    let buf = std::fs::read(pftrace_fname)?;
+    let config = Config::from_args();
+
+    let rejected = config.rejected_file.as_ref().map(|rejected_fname| {
+        let rejected = std::fs::read_to_string(rejected_fname)
+            .expect("Unable to read rejection file")
+            .trim_end_matches('\u{0}')
+            .trim()
+            .split(' ')
+            .map(|part| {
+                let mut iter = part.split(':');
+                (iter.next().unwrap(), iter.next().unwrap())
+            })
+            .map(|(bits, count)| {
+                (
+                    MMStatsBitflags(bits.parse::<u64>().expect("not an integer")),
+                    count.parse::<u64>().expect("not an integer"),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        (rejected, config.rejection_threshold.unwrap())
+    });
+    let buf = std::fs::read(&config.pftrace_file)?;
     let buf: &[MMStatsPftrace] = unsafe {
         assert!(buf.len() % std::mem::size_of::<MMStatsPftrace>() == 0);
         let (pre, aligned, post) = buf.as_slice().align_to();
@@ -156,51 +218,58 @@ fn main() -> std::io::Result<()> {
         aligned
     };
 
-    let rejected = std::fs::read_to_string(rejected_fname)?
-        .trim_end_matches('\u{0}')
-        .trim()
-        .split(' ')
-        .map(|part| {
-            let mut iter = part.split(':');
-            (iter.next().unwrap(), iter.next().unwrap())
-        })
-        .map(|(bits, count)| {
-            (
-                MMStatsBitflags(bits.parse::<u64>().expect("not an integer")),
-                count.parse::<u64>().expect("not an integer"),
-            )
-        })
-        .collect::<Vec<_>>();
-
-    do_work(&buf, &rejected, threshold);
+    if config.pdf {
+        generate_pdfs(&config, &buf, rejected.as_ref());
+    } else {
+        generate_cdfs(&config, &buf, rejected.as_ref());
+    }
 
     Ok(())
 }
 
-fn do_work(buf: &[MMStatsPftrace], rejected: &[(MMStatsBitflags, u64)], threshold: u64) {
-    use hdrhistogram::Histogram;
-
+fn categorize(
+    config: &Config,
+    buf: &[MMStatsPftrace],
+    rejected: Option<&(Vec<(MMStatsBitflags, u64)>, u64)>,
+) -> CategorizedData {
     // We categorize events by their bitflags.
-    let mut categorized: BTreeMap<_, Histogram<u64>> = BTreeMap::new();
+    let mut categorized: CategorizedData = BTreeMap::new();
     for trace in buf {
+        let data = match config.data_mode {
+            DataMode::Duration => trace.end_tsc - trace.start_tsc,
+            DataMode::AllocTotal => trace.alloc_end_tsc - trace.alloc_start_tsc,
+            DataMode::AllocClearing => trace.alloc_zeroing_duration,
+            DataMode::PrepTotal => trace.prep_end_tsc - trace.prep_start_tsc,
+        };
+
         categorized
             .entry(trace.bitflags)
             .or_insert(Histogram::new(5).unwrap())
-            .record(trace.end_tsc - trace.start_tsc)
+            .record(data)
             .unwrap();
     }
 
     // Adjust for the rejected samples.
-    for (bitflags, rejected_count) in rejected {
-        categorized
-            .entry(*bitflags)
-            .or_insert(Histogram::new(5).unwrap())
-            .record_n(threshold, *rejected_count)
-            .unwrap();
+    if let Some((rejected, threshold)) = rejected {
+        for (bitflags, rejected_count) in rejected {
+            categorized
+                .entry(*bitflags)
+                .or_insert(Histogram::new(5).unwrap())
+                .record_n(*threshold, *rejected_count)
+                .unwrap();
+        }
     }
 
-    // Print output.
-    for (flags, hist) in categorized.iter() {
+    categorized
+}
+
+fn print_quartiles(categorized: &CategorizedData) {
+    let mut total = 0;
+
+    let mut keys = categorized.keys().collect::<Vec<_>>();
+    keys.sort_by_key(|flags| categorized.get(flags).unwrap().len());
+    for flags in keys.iter() {
+        let hist = categorized.get(flags).unwrap();
         println!(
             "{:4X}: {}",
             flags.0,
@@ -219,9 +288,22 @@ fn do_work(buf: &[MMStatsPftrace], rejected: &[(MMStatsBitflags, u64)], threshol
             print!(" P{:.0}={}", p * 100.0, v);
         }
         println!(" N={}", hist.len());
+
+        total += hist.len();
     }
 
-    println!("------\nTotal: {}", buf.len());
+    println!("Total: {}", total);
+}
+
+fn generate_cdfs(
+    config: &Config,
+    buf: &[MMStatsPftrace],
+    rejected: Option<&(Vec<(MMStatsBitflags, u64)>, u64)>,
+) {
+    let categorized = categorize(config, buf, rejected);
+
+    // Print output.
+    print_quartiles(&categorized);
 
     // Print for plotting...
     //
@@ -246,6 +328,80 @@ fn do_work(buf: &[MMStatsPftrace], rejected: &[(MMStatsBitflags, u64)], threshol
         print!(" {}({})", flags, hist.len());
         for v in (0..=100).map(|p| hist.value_at_quantile((p as f64) / 100.)) {
             print!(" {}", v);
+        }
+    }
+
+    /*
+    for trace in buf {
+        println!(
+            "total={:10} bits={:4X} {}",
+            trace.end_tsc - trace.start_tsc,
+            trace.bitflags.0,
+            trace
+                .bitflags
+                .flags()
+                .iter()
+                .map(MMStatsPftraceFlags::name)
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+    }
+    */
+}
+
+fn generate_pdfs(
+    config: &Config,
+    buf: &[MMStatsPftrace],
+    rejected: Option<&(Vec<(MMStatsBitflags, u64)>, u64)>,
+) {
+    let categorized = categorize(config, buf, rejected);
+
+    // Print output.
+    print_quartiles(&categorized);
+
+    // Print for plotting...
+    //
+    // For the sake of plotting, we sort by the number of events.
+    let minvalue = categorized
+        .values()
+        .map(|h| h.min())
+        .min()
+        .expect("No min?");
+    let mut keys = categorized.keys().collect::<Vec<_>>();
+    keys.sort_by_key(|flags| categorized.get(flags).unwrap().len());
+    for flags in keys.iter() {
+        let hist = categorized.get(flags).unwrap();
+        let flags = {
+            let flags = flags
+                .flags()
+                .iter()
+                .map(MMStatsPftraceFlags::name)
+                .collect::<Vec<_>>()
+                .join(",");
+            if flags.is_empty() {
+                "none".into()
+            } else {
+                flags
+            }
+        };
+        print!(" {}({})", flags, hist.len());
+
+        const PDF_STEP_SIZE: u64 = 2;
+        let start = if let Some((_, threshold)) = rejected {
+            *threshold
+        } else {
+            minvalue
+        };
+        let mut min = hist.lowest_equivalent(start);
+        for i in 0.. {
+            let max = hist.highest_equivalent(min + PDF_STEP_SIZE.pow(i));
+            print!(" {}:{}", max, hist.count_between(min, max));
+
+            if max > hist.max() {
+                break;
+            } else {
+                min = max;
+            }
         }
     }
 
