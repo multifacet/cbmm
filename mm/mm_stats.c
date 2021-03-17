@@ -339,15 +339,6 @@ char *mm_stats_pf_flags_names[MM_STATS_NUM_FLAGS] = {
 	[MM_STATS_PF_ALLOC_FALLBACK] = "MM_STATS_PF_ALLOC_FALLBACK",
 };
 
-// Create /proc/pftrace_enable which enables/disables pftrace.
-// 0: off
-// !0: on
-MM_STATS_PROC_CREATE_INT(int, pftrace_enable, 0, "%d")
-// Create /proc/pftrace_threshold - the rejection threshold for samples (in cycles).
-#define MM_STATS_PFTRACE_DEFAULT_THRESHOLD (100 * 1000)
-MM_STATS_PROC_CREATE_INT(u64, pftrace_threshold,
-        MM_STATS_PFTRACE_DEFAULT_THRESHOLD, "%llu")
-
 // This is the pftrace file, found at "/pftrace". We also keep track of the
 // file offset for writes and the number of writes so far so we can batch
 // fsyncing.
@@ -355,6 +346,21 @@ MM_STATS_PROC_CREATE_INT(u64, pftrace_threshold,
 static struct file *pftrace_file = NULL;
 static loff_t pftrace_pos = 0;
 static long pftrace_nwrites = 0;
+
+// Create /proc/pftrace_enable which enables/disables pftrace.
+// 0: off
+// !0: on
+//
+// At the same time, it attempts to open the pftrace file when written to.
+static inline int open_pftrace_file(void);
+MM_STATS_PROC_CREATE_INT_INNER(int, pftrace_enable, 0, "%d", {
+    long err = open_pftrace_file();
+    if (err) return err;
+})
+// Create /proc/pftrace_threshold - the rejection threshold for samples (in cycles).
+#define MM_STATS_PFTRACE_DEFAULT_THRESHOLD (100 * 1000)
+MM_STATS_PROC_CREATE_INT(u64, pftrace_threshold,
+        MM_STATS_PFTRACE_DEFAULT_THRESHOLD, "%llu")
 
 // Keep counts of the number of rejected sample for different sets of bitflags.
 // This helps us figure out what part of the tail our samples are.
@@ -500,7 +506,11 @@ void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
 
     // Make sure the trace file is open.
     err = open_pftrace_file();
-    if (err) return;
+    if (err) {
+        pr_err_once("mm_stats: pftrace file not open. "
+                    "Dropping unrejected samples!");
+        return;
+    }
 
     /* for debugging...
     pr_warn("mm_stats: total=%10llu bits=%llx",
