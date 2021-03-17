@@ -343,6 +343,10 @@ char *mm_stats_pf_flags_names[MM_STATS_NUM_FLAGS] = {
 // 0: off
 // !0: on
 MM_STATS_PROC_CREATE_INT(int, pftrace_enable, 0, "%d")
+// Create /proc/pftrace_threshold - the rejection threshold for samples (in cycles).
+#define MM_STATS_PFTRACE_DEFAULT_THRESHOLD (100 * 1000)
+MM_STATS_PROC_CREATE_INT(u64, pftrace_threshold,
+        MM_STATS_PFTRACE_DEFAULT_THRESHOLD, "%llu")
 
 // This is the pftrace file, found at "/pftrace". We also keep track of the
 // file offset for writes and the number of writes so far so we can batch
@@ -481,7 +485,6 @@ void mm_stats_pftrace_init(struct mm_stats_pftrace *trace)
 
 void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
 {
-    const u64 PFTHRESHOLD = 1000 * 100; // cycles
     long err;
     ssize_t total_written = 0, written;
 
@@ -490,7 +493,7 @@ void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
 
     // Filter out some events.
     // TODO: more complex filter...
-    if (trace->end_tsc - trace->start_tsc < PFTHRESHOLD) {
+    if (trace->end_tsc - trace->start_tsc < pftrace_threshold) {
         rejected_sample(trace);
         return;
     }
@@ -588,6 +591,7 @@ MM_STATS_PROC_CREATE_HIST(mm_econ_benefit);
 void mm_stats_init(void)
 {
     MM_STATS_INIT_INT(pftrace_enable);
+    MM_STATS_INIT_INT(pftrace_threshold);
     hash_init(pftrace_rejected_samples);
     rejected_hash_ent = proc_create("pftrace_rejected",
             0444, NULL, &rejected_hash_ops);
