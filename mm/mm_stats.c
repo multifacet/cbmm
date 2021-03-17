@@ -469,7 +469,8 @@ static inline int open_pftrace_file(void) {
 
     pftrace_file = file;
 
-    pr_warn("mm_stats: Successfully opened %s\n", MM_STATS_PFTRACE_FNAME);
+    pr_warn("mm_stats: Successfully opened %s current->uid=%u\n",
+            MM_STATS_PFTRACE_FNAME, __kuid_val(current_cred()->uid));
     return 0;
 }
 
