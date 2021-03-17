@@ -361,6 +361,8 @@ MM_STATS_PROC_CREATE_INT_INNER(int, pftrace_enable, 0, "%d", {
 #define MM_STATS_PFTRACE_DEFAULT_THRESHOLD (100 * 1000)
 MM_STATS_PROC_CREATE_INT(u64, pftrace_threshold,
         MM_STATS_PFTRACE_DEFAULT_THRESHOLD, "%llu")
+// Keeps count of samples dropped because they occurred in an interrupt context.
+MM_STATS_PROC_CREATE_INT(u64, pftrace_discarded_from_interrupt, 0, "%llu")
 
 // Keep counts of the number of rejected sample for different sets of bitflags.
 // This helps us figure out what part of the tail our samples are.
@@ -504,6 +506,14 @@ void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
         return;
     }
 
+    // If we are in an interrupt context, we can't write to a file.
+    // TODO: if it turns out to be important we change this to buffer the trace
+    //       for latter...
+    if (in_interrupt()) {
+        pftrace_discarded_from_interrupt += 1;
+        return;
+    }
+
     // Make sure the trace file is open.
     err = open_pftrace_file();
     if (err) {
@@ -602,6 +612,7 @@ void mm_stats_init(void)
 {
     MM_STATS_INIT_INT(pftrace_enable);
     MM_STATS_INIT_INT(pftrace_threshold);
+    MM_STATS_INIT_INT(pftrace_discarded_from_interrupt);
     hash_init(pftrace_rejected_samples);
     rejected_hash_ent = proc_create("pftrace_rejected",
             0444, NULL, &rejected_hash_ops);
