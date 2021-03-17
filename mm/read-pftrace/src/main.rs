@@ -19,11 +19,11 @@ struct Config {
     pftrace_file: PathBuf,
 
     /// The file with counts of rejected pftrace samples.
-    #[structopt(requires("rejection_threshold"))]
+    #[structopt(requires("rejection-threshold"))]
     rejected_file: Option<PathBuf>,
 
     /// The threshold below which samples are rejected.
-    #[structopt(requires("rejected_file"))]
+    #[structopt(requires("rejected-file"))]
     rejection_threshold: Option<u64>,
 
     /// Output PDF, rather than CDF.
