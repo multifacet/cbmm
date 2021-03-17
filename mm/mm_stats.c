@@ -8,6 +8,7 @@
 #include <linux/slab.h>
 #include <linux/fs.h>
 #include <linux/hashtable.h>
+#include <linux/cred.h>
 
 #define MM_STATS_INSTR_BUFSIZE 24
 
@@ -458,7 +459,9 @@ static inline int open_pftrace_file(void) {
             O_WRONLY | O_CREAT | O_TRUNC, 0444);
     if (IS_ERR(file)) {
         err = PTR_ERR(file);
-        pr_err("mm_stats: Failed to open pftrace file. errno=%ld\n", err);
+        pr_err("mm_stats: Failed to open pftrace file. "
+               "errno=%ld current->uid=%u\n",
+               err, __kuid_val(current_cred()->uid));
         return err;
     }
 

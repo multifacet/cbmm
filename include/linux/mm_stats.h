@@ -111,6 +111,8 @@ enum mm_stats_pf_flags {
 	// Set: the physical memory allocator fell back to the slow path.
 	MM_STATS_PF_ALLOC_FALLBACK,
 
+	// TODO(markm): also want to instrument reclaim/compaction, OOM?...
+
 	// NOTE: must be the last value in the enum... not actually a flag.
 	MM_STATS_NUM_FLAGS,
 };
