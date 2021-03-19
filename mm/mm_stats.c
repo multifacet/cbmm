@@ -363,6 +363,8 @@ MM_STATS_PROC_CREATE_INT(u64, pftrace_threshold,
         MM_STATS_PFTRACE_DEFAULT_THRESHOLD, "%llu")
 // Keeps count of samples dropped because they occurred in an interrupt context.
 MM_STATS_PROC_CREATE_INT(u64, pftrace_discarded_from_interrupt, 0, "%llu")
+// Keeps count of samples dropped due to FS errors.
+MM_STATS_PROC_CREATE_INT(u64, pftrace_discarded_from_error, 0, "%llu")
 
 // Keep counts of the number of rejected sample for different sets of bitflags.
 // This helps us figure out what part of the tail our samples are.
@@ -519,6 +521,7 @@ void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
     if (err) {
         pr_err_once("mm_stats: pftrace file not open. "
                     "Dropping unrejected samples!");
+        pftrace_discarded_from_error += 1;
         return;
     }
 
@@ -540,6 +543,7 @@ void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
                 sizeof(struct mm_stats_pftrace), &pftrace_pos);
         if (written < 0) {
             pr_err("mm_stats: error writing pftrace: %ld\n", written);
+            pftrace_discarded_from_error += 1;
             return;
         }
 
@@ -613,6 +617,7 @@ void mm_stats_init(void)
     MM_STATS_INIT_INT(pftrace_enable);
     MM_STATS_INIT_INT(pftrace_threshold);
     MM_STATS_INIT_INT(pftrace_discarded_from_interrupt);
+    MM_STATS_INIT_INT(pftrace_discarded_from_error);
     hash_init(pftrace_rejected_samples);
     rejected_hash_ent = proc_create("pftrace_rejected",
             0444, NULL, &rejected_hash_ops);
