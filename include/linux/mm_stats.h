@@ -111,7 +111,14 @@ enum mm_stats_pf_flags {
 	// Set: the physical memory allocator fell back to the slow path.
 	MM_STATS_PF_ALLOC_FALLBACK,
 
-	// TODO(markm): also want to instrument reclaim/compaction, OOM?...
+	// Set: the physical memory allocator slowpath executed multiple times.
+	MM_STATS_PF_ALLOC_FALLBACK_RETRY,
+
+	// Set: the physical memory allocator slowpath executed page reclamation.
+	MM_STATS_PF_ALLOC_FALLBACK_RECLAIM,
+
+	// Set: the physical memory allocator slowpath executed page compaction.
+	MM_STATS_PF_ALLOC_FALLBACK_COMPACT,
 
 	// NOTE: must be the last value in the enum... not actually a flag.
 	MM_STATS_NUM_FLAGS,
@@ -123,6 +130,9 @@ extern char *mm_stats_pf_flags_names[MM_STATS_NUM_FLAGS];
 
 // Hacky mechanism for determining if last allocation has failed.
 DECLARE_PER_CPU(bool, pftrace_alloc_fallback);
+DECLARE_PER_CPU(bool, pftrace_alloc_fallback_retry);
+DECLARE_PER_CPU(bool, pftrace_alloc_fallback_reclaim);
+DECLARE_PER_CPU(bool, pftrace_alloc_fallback_compact);
 DECLARE_PER_CPU(bool, pftrace_alloc_zeroed_page);
 DECLARE_PER_CPU(u64, pftrace_alloc_zeroing_duration);
 
@@ -152,6 +162,15 @@ static inline void mm_stats_check_alloc_fallback(
 {
 	if (get_cpu_var(pftrace_alloc_fallback)) {
 		mm_stats_set_flag(trace, MM_STATS_PF_ALLOC_FALLBACK);
+	}
+	if (get_cpu_var(pftrace_alloc_fallback_retry)) {
+		mm_stats_set_flag(trace, MM_STATS_PF_ALLOC_FALLBACK_RETRY);
+	}
+	if (get_cpu_var(pftrace_alloc_fallback_reclaim)) {
+		mm_stats_set_flag(trace, MM_STATS_PF_ALLOC_FALLBACK_RECLAIM);
+	}
+	if (get_cpu_var(pftrace_alloc_fallback_compact)) {
+		mm_stats_set_flag(trace, MM_STATS_PF_ALLOC_FALLBACK_COMPACT);
 	}
 }
 

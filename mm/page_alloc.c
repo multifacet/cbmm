@@ -103,6 +103,9 @@ int _node_numa_mem_[MAX_NUMNODES];
 // allocation. This is inherenetly a bit racy, but it's probably good enough
 // because the fast path is fast.
 DEFINE_PER_CPU(bool, pftrace_alloc_fallback);
+DEFINE_PER_CPU(bool, pftrace_alloc_fallback_retry);
+DEFINE_PER_CPU(bool, pftrace_alloc_fallback_reclaim);
+DEFINE_PER_CPU(bool, pftrace_alloc_fallback_compact);
 // markm: ditto but to check if we zeroed a page and how long it took.
 DEFINE_PER_CPU(bool, pftrace_alloc_zeroed_page);
 DEFINE_PER_CPU(u64, pftrace_alloc_zeroing_duration);
@@ -3898,6 +3901,8 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 	if (!order)
 		return NULL;
 
+	get_cpu_var(pftrace_alloc_fallback_compact) = true;
+
     start = rdtsc();
 
 	psi_memstall_enter(&pflags);
@@ -4150,6 +4155,8 @@ __alloc_pages_direct_reclaim(gfp_t gfp_mask, unsigned int order,
 	struct page *page = NULL;
 	bool drained = false;
 	u64 start = rdtsc();
+
+	get_cpu_var(pftrace_alloc_fallback_reclaim) = true;
 
 	*did_some_progress = __perform_reclaim(gfp_mask, order, ac);
 	if (unlikely(!(*did_some_progress))) {
@@ -4425,6 +4432,7 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
 	int no_progress_loops;
 	unsigned int cpuset_mems_cookie;
 	int reserve_flags;
+	int retry_count = 0;
 
 	/*
 	 * We also sanity check to catch abuse of atomic reserves being used by
@@ -4525,6 +4533,11 @@ retry_cpuset:
 	}
 
 retry:
+	if (retry_count) {
+		get_cpu_var(pftrace_alloc_fallback_retry) = true;
+	}
+	retry_count += 1;
+
 	/* Ensure kswapd doesn't accidentally go to sleep as long as we loop */
 	if (alloc_flags & ALLOC_KSWAPD)
 		wake_all_kswapds(order, gfp_mask, ac);
@@ -4730,6 +4743,9 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	struct alloc_context ac = { };
 
 	get_cpu_var(pftrace_alloc_fallback) = false;
+	get_cpu_var(pftrace_alloc_fallback_retry) = false;
+	get_cpu_var(pftrace_alloc_fallback_reclaim) = false;
+	get_cpu_var(pftrace_alloc_fallback_compact) = false;
 	get_cpu_var(pftrace_alloc_zeroed_page) = false;
 
 	/*
