@@ -178,7 +178,7 @@ static inline void mm_stats_check_alloc_zeroing(
 		struct mm_stats_pftrace *trace)
 {
 	if (get_cpu_var(pftrace_alloc_zeroed_page)) {
-		mm_stats_set_flag(trace, MM_STATS_PF_ALLOC_FALLBACK);
+		mm_stats_set_flag(trace, MM_STATS_PF_CLEARED_MEM);
 		trace->alloc_zeroing_duration =
 			get_cpu_var(pftrace_alloc_zeroing_duration);
 	}
