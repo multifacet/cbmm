@@ -2553,15 +2553,19 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf,
 		goto oom;
 
 	if (is_zero_pfn(pte_pfn(vmf->orig_pte))) {
+		pftrace->alloc_start_tsc = rdtsc();
 		new_page = alloc_zeroed_user_highpage_movable(vma,
 							      vmf->address);
+		pftrace->alloc_end_tsc = rdtsc();
 		mm_stats_check_alloc_fallback(pftrace);
 		mm_stats_check_alloc_zeroing(pftrace);
 		if (!new_page)
 			goto oom;
 	} else {
+		pftrace->alloc_start_tsc = rdtsc();
 		new_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma,
 				vmf->address);
+		pftrace->alloc_end_tsc = rdtsc();
 		mm_stats_check_alloc_fallback(pftrace);
 		mm_stats_check_alloc_zeroing(pftrace);
 		if (!new_page)
@@ -3274,7 +3278,9 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf,
 	/* Allocate our own private page. */
 	if (unlikely(anon_vma_prepare(vma)))
 		goto oom;
+	pftrace->alloc_start_tsc = rdtsc();
 	page = alloc_zeroed_user_highpage_movable(vma, vmf->address);
+	pftrace->alloc_end_tsc = rdtsc();
 	mm_stats_check_alloc_fallback(pftrace);
 	mm_stats_check_alloc_zeroing(pftrace);
 	if (!page)
