@@ -191,6 +191,10 @@ impl MMStatsBitflags {
         }
         vec
     }
+
+    pub fn from_hex_str(s: &str) -> Result<Self, std::num::ParseIntError> {
+        u64::from_str_radix(s, 16).map(|f| Self(f))
+    }
 }
 
 fn main() -> std::io::Result<()> {
@@ -208,7 +212,7 @@ fn main() -> std::io::Result<()> {
             })
             .map(|(bits, count)| {
                 (
-                    MMStatsBitflags(bits.parse::<u64>().expect("not an integer")),
+                    MMStatsBitflags::from_hex_str(bits).expect("not an integer"),
                     count.parse::<u64>().expect("not an integer"),
                 )
             })
