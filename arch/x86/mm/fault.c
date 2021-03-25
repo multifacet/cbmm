@@ -1498,13 +1498,12 @@ good_area:
 	}
 
 	// markm: check if we should promote the recently created page.
-	// TODO(makrm): UNCOMMENT!
-	//if (!is_huge && huge_addr_enabled(vma, address)) {
-	//	ret = promote_to_huge(mm, vma, address & HPAGE_PMD_MASK, pftrace);
-	//	if (ret == SCAN_SUCCEED) {
-	//		mm_register_promotion(address & HPAGE_PMD_MASK);
-	//	}
-	//}
+	if (!is_huge && huge_addr_enabled(vma, address)) {
+		ret = promote_to_huge(mm, vma, address & HPAGE_PMD_MASK, pftrace);
+		if (ret == SCAN_SUCCEED) {
+			mm_register_promotion(address & HPAGE_PMD_MASK);
+		}
+	}
 
 	/*
 	 * Major/minor page fault accounting. If any of the events
