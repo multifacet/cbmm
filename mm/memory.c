@@ -4227,7 +4227,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf,
 		    if((vmf->flags & FAULT_FLAG_WRITE)
 			    && !pte_write(entry))
 		    {
-			mm_stats_set_flag(pftrace, MM_STATS_PF_COW);
+			mm_stats_set_flag(pftrace, MM_STATS_PF_WP);
 
 			// We want to do this here because we want
 			// do_wp_page not to see the magical reserved bit.
@@ -4332,7 +4332,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf,
 		goto unlock;
 	if (vmf->flags & FAULT_FLAG_WRITE) {
 		if (!pte_write(entry)) {
-			mm_stats_set_flag(pftrace, MM_STATS_PF_COW);
+			mm_stats_set_flag(pftrace, MM_STATS_PF_WP);
 			return do_wp_page(vmf, pftrace);
 		}
 		entry = pte_mkdirty(entry);
@@ -4460,7 +4460,7 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 		    && !pud_write(orig_pud) && pud_present(orig_pud))
 	    {
 		mm_stats_set_flag(pftrace, MM_STATS_PF_VERY_HUGE_PAGE);
-		mm_stats_set_flag(pftrace, MM_STATS_PF_COW);
+		mm_stats_set_flag(pftrace, MM_STATS_PF_WP);
 		// NOTE: This is pseudocode... Linux doesn't support
 		// transparent 1GB huge pages yet...
 		//
@@ -4529,7 +4529,7 @@ retry_pud:
 				ret = wp_huge_pud(&vmf, orig_pud);
 				if (!(ret & VM_FAULT_FALLBACK)) {
 					mm_stats_set_flag(pftrace, MM_STATS_PF_VERY_HUGE_PAGE);
-					mm_stats_set_flag(pftrace, MM_STATS_PF_COW);
+					mm_stats_set_flag(pftrace, MM_STATS_PF_WP);
 					return ret;
 				}
 			} else {
@@ -4553,7 +4553,7 @@ retry_pud:
 			&& !pmd_write(orig_pmd) && pmd_present(orig_pmd))
                 {
 			mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_PAGE);
-			mm_stats_set_flag(pftrace, MM_STATS_PF_COW);
+			mm_stats_set_flag(pftrace, MM_STATS_PF_WP);
 			return do_huge_pmd_wp_page(&vmf, orig_pmd, pftrace);
                 }
                 if (is_pmd_reserved(orig_pmd) && pmd_present(orig_pmd))
@@ -4622,7 +4622,7 @@ retry_pud:
 			// faults. Should add mm-econ logic here too.
 			if (dirty && !pmd_write(orig_pmd)) {
 				ret = wp_huge_pmd(&vmf, orig_pmd, pftrace);
-				mm_stats_set_flag(pftrace, MM_STATS_PF_COW);
+				mm_stats_set_flag(pftrace, MM_STATS_PF_WP);
 				if (!(ret & VM_FAULT_FALLBACK))
 					return ret;
 			} else {
