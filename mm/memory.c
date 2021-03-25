@@ -3796,7 +3796,7 @@ static vm_fault_t do_read_fault(struct vm_fault *vmf)
 	return ret;
 }
 
-static vm_fault_t do_cow_fault(struct vm_fault *vmf)
+static vm_fault_t do_cow_fault(struct vm_fault *vmf, struct mm_stats_pftrace *pftrace)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	vm_fault_t ret;
@@ -3804,7 +3804,11 @@ static vm_fault_t do_cow_fault(struct vm_fault *vmf)
 	if (unlikely(anon_vma_prepare(vma)))
 		return VM_FAULT_OOM;
 
+	pftrace->alloc_start_tsc = rdtsc();
 	vmf->cow_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, vmf->address);
+	pftrace->alloc_end_tsc = rdtsc();
+	mm_stats_check_alloc_fallback(pftrace);
+	mm_stats_check_alloc_zeroing(pftrace);
 	if (!vmf->cow_page)
 		return VM_FAULT_OOM;
 
@@ -3820,8 +3824,10 @@ static vm_fault_t do_cow_fault(struct vm_fault *vmf)
 	if (ret & VM_FAULT_DONE_COW)
 		return ret;
 
+	pftrace->prep_start_tsc = rdtsc();
 	copy_user_highpage(vmf->cow_page, vmf->page, vmf->address, vma);
 	__SetPageUptodate(vmf->cow_page);
+	pftrace->prep_end_tsc = rdtsc();
 
 	ret |= finish_fault(vmf);
 	unlock_page(vmf->page);
@@ -3878,7 +3884,7 @@ static vm_fault_t do_shared_fault(struct vm_fault *vmf)
  * If mmap_sem is released, vma may become invalid (for example
  * by other thread calling munmap()).
  */
-static vm_fault_t do_fault(struct vm_fault *vmf)
+static vm_fault_t do_fault(struct vm_fault *vmf, struct mm_stats_pftrace *pftrace)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct mm_struct *vm_mm = vma->vm_mm;
@@ -3916,7 +3922,7 @@ static vm_fault_t do_fault(struct vm_fault *vmf)
 	} else if (!(vmf->flags & FAULT_FLAG_WRITE))
 		ret = do_read_fault(vmf);
 	else if (!(vma->vm_flags & VM_SHARED))
-		ret = do_cow_fault(vmf);
+		ret = do_cow_fault(vmf, pftrace);
 	else
 		ret = do_shared_fault(vmf);
 
@@ -4311,7 +4317,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf,
 			return do_anonymous_page(vmf, pftrace);
 		else {
 			mm_stats_set_flag(pftrace, MM_STATS_PF_NOT_ANON);
-			return do_fault(vmf);
+			return do_fault(vmf, pftrace);
 		}
 	}
 
