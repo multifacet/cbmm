@@ -3769,10 +3769,12 @@ out:
 	return ret;
 }
 
-static vm_fault_t do_read_fault(struct vm_fault *vmf)
+static vm_fault_t do_read_fault(struct vm_fault *vmf, struct mm_stats_pftrace *pftrace)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	vm_fault_t ret = 0;
+
+	mm_stats_set_flag(pftrace, MM_STATS_PF_NOT_ANON_READ);
 
 	/*
 	 * Let's call ->map_pages() first and use ->fault() as fallback
@@ -3800,6 +3802,8 @@ static vm_fault_t do_cow_fault(struct vm_fault *vmf, struct mm_stats_pftrace *pf
 {
 	struct vm_area_struct *vma = vmf->vma;
 	vm_fault_t ret;
+
+	mm_stats_set_flag(pftrace, MM_STATS_PF_NOT_ANON_COW);
 
 	if (unlikely(anon_vma_prepare(vma)))
 		return VM_FAULT_OOM;
@@ -3841,10 +3845,12 @@ uncharge_out:
 	return ret;
 }
 
-static vm_fault_t do_shared_fault(struct vm_fault *vmf)
+static vm_fault_t do_shared_fault(struct vm_fault *vmf, struct mm_stats_pftrace *pftrace)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	vm_fault_t ret, tmp;
+
+	mm_stats_set_flag(pftrace, MM_STATS_PF_NOT_ANON_SHARED);
 
 	ret = __do_fault(vmf);
 	if (unlikely(ret & (VM_FAULT_ERROR | VM_FAULT_NOPAGE | VM_FAULT_RETRY)))
@@ -3920,11 +3926,11 @@ static vm_fault_t do_fault(struct vm_fault *vmf, struct mm_stats_pftrace *pftrac
 			pte_unmap_unlock(vmf->pte, vmf->ptl);
 		}
 	} else if (!(vmf->flags & FAULT_FLAG_WRITE))
-		ret = do_read_fault(vmf);
+		ret = do_read_fault(vmf, pftrace);
 	else if (!(vma->vm_flags & VM_SHARED))
 		ret = do_cow_fault(vmf, pftrace);
 	else
-		ret = do_shared_fault(vmf);
+		ret = do_shared_fault(vmf, pftrace);
 
 	/* preallocated pagetable is unused: free it */
 	if (vmf->prealloc_pte) {

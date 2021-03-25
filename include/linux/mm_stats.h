@@ -86,6 +86,15 @@ enum mm_stats_pf_flags {
 	// file-backed memory region).
 	MM_STATS_PF_NOT_ANON,
 
+	// Set: this non-anonymous page took a load-related fault.
+	MM_STATS_PF_NOT_ANON_READ,
+
+	// Set: this non-anonymous page took a cow-related fault.
+	MM_STATS_PF_NOT_ANON_COW,
+
+	// Set: this non-anonymous page is shared.
+	MM_STATS_PF_NOT_ANON_SHARED,
+
 	// Set: this fault mapped a zero-page.
 	MM_STATS_PF_ZERO,
 

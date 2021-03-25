@@ -120,7 +120,6 @@ macro_rules! with_stringify {
     };
 }
 
-/// A bunch of bit flags that indicate things that could happen during a #PF.
 with_stringify! {
     enum MMStatsPftraceFlags {
         HUGE_PAGE,
@@ -130,6 +129,9 @@ with_stringify! {
         NUMA,
         SWAP,
         NOT_ANON,
+        NOT_ANON_READ,
+        NOT_ANON_COW,
+        NOT_ANON_SHARED,
         ZERO,
         HUGE_ALLOC_FAILED,
         HUGE_SPLIT,
