@@ -1,6 +1,6 @@
 //! Reads traces in binary form produced by the pftrace mechanism.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
 use clap::arg_enum;
@@ -42,6 +42,13 @@ struct Config {
     /// Only output 1 line of data for use with a plotting script.
     #[structopt(long)]
     cli_only: bool,
+
+    /// If passed, creates an "Other" category and collects all bitflags whose frequency is
+    /// less than or equal to the given threshold. Otherwise, all categories are listed, even
+    /// if they only have one recorded sample. Passing this flag increases the time to process
+    /// the trace.
+    #[structopt(long)]
+    other_category: Option<u64>,
 }
 
 arg_enum! {
@@ -167,6 +174,7 @@ with_stringify! {
         ALLOC_FALLBACK_RECLAIM,
         ALLOC_FALLBACK_COMPACT,
 
+        OTHER, // A hack -- shouldn't actually be in use...
         MM_STATS_NUM_FLAGS,
     }
 }
@@ -269,6 +277,49 @@ fn categorize(
                 .record_n(*threshold, *rejected_count)
                 .unwrap();
         }
+    }
+
+    // Create "Other" category if needed.
+    if let Some(threshold) = config.other_category {
+        // Figure out which categories to collect under "Other".
+        let cats = categorized
+            .iter()
+            .filter(|(_, hist)| hist.len() <= threshold)
+            .map(|(cat, _)| *cat)
+            .collect::<HashSet<_>>();
+
+        // Remove categories.
+        for cat in cats.iter() {
+            categorized.remove(&cat);
+        }
+
+        // Create the new histogram.
+        let mut other_hist: Histogram<u64> = Histogram::new(5).unwrap();
+
+        for trace in buf.iter().filter(|trace| cats.contains(&trace.bitflags)) {
+            let data = match config.data_mode {
+                DataMode::Duration => trace.end_tsc - trace.start_tsc,
+                DataMode::AllocTotal => trace.alloc_end_tsc - trace.alloc_start_tsc,
+                DataMode::AllocClearing => trace.alloc_zeroing_duration,
+                DataMode::PrepTotal => trace.prep_end_tsc - trace.prep_start_tsc,
+            };
+
+            other_hist.record(data).unwrap();
+        }
+
+        // Re-adjust
+        if let Some((rejected, threshold)) = rejected {
+            for (bitflags, rejected_count) in rejected {
+                if cats.contains(&bitflags) {
+                    other_hist.record_n(*threshold, *rejected_count).unwrap();
+                }
+            }
+        }
+
+        categorized.insert(
+            MMStatsBitflags(1u64 << (MMStatsPftraceFlags::OTHER as u64)),
+            other_hist,
+        );
     }
 
     categorized
