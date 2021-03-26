@@ -76,6 +76,9 @@ enum mm_stats_pf_flags {
 	// Set: this fault was a write-protected page.
 	MM_STATS_PF_WP,
 
+	// Set: this fault happened on an instruction fetch.
+	MM_STATS_PF_EXEC,
+
 	// Set: this fault was a "NUMA hinting fault", possibly with a migration.
 	MM_STATS_PF_NUMA,
 

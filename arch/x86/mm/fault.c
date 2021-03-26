@@ -1367,8 +1367,11 @@ bool do_user_addr_fault(struct pt_regs *regs,
 
 	if (hw_error_code & X86_PF_WRITE)
 		flags |= FAULT_FLAG_WRITE;
-	if (hw_error_code & X86_PF_INSTR)
+	if (hw_error_code & X86_PF_INSTR) {
 		flags |= FAULT_FLAG_INSTRUCTION;
+		mm_stats_set_flag(pftrace, MM_STATS_PF_EXEC);
+	}
+
 
 #ifdef CONFIG_X86_64
 	/*

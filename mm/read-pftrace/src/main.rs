@@ -126,6 +126,7 @@ with_stringify! {
         VERY_HUGE_PAGE,
         BADGER_TRAP,
         WP,
+        EXEC,
         NUMA,
         SWAP,
         NOT_ANON,
