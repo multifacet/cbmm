@@ -20,6 +20,8 @@
 // - 1: on (cost-benefit estimation)
 static int mm_econ_mode = 0;
 
+static int mm_econ_mmap_filters = 0;
+
 // The Preloaded Profile, if any.
 struct profile_range {
     u64 start;
@@ -30,8 +32,38 @@ struct profile_range {
     struct rb_node node;
 };
 
+// The operator to use when deciding if quantity from an mmap matches
+// the filter.
+enum mmap_comparator {
+    CompEquals,
+    CompGreaterThan,
+    CompLessThan,
+    CompIgnore
+};
+
+// A quantity for filtering an mmap with and how to compare the quantity
+struct mmap_quantity {
+    u64 val;
+    enum mmap_comparator comp;
+};
+
+// A list of quantities of a mmap to use for deciding if that mmap would
+// benefit from being huge.
+struct mmap_filter {
+    struct list_head node;
+    struct mmap_quantity addr;
+    struct mmap_quantity len;
+    struct mmap_quantity prot;
+    struct mmap_quantity flags;
+    struct mmap_quantity fd;
+    struct mmap_quantity off;
+};
+
 // Invariant: none of the ranges overlap!
 static struct rb_root preloaded_profile = RB_ROOT;
+
+// List of mmap filters
+static LIST_HEAD(mmap_filters);
 
 // The TLB misses estimator, if any.
 static mm_econ_tlb_miss_estimator_fn_t tlb_miss_est_fn = NULL;
@@ -165,6 +197,18 @@ print_profile(void)
     }
 
     pr_warn("mm_econ: END profile...");
+}
+
+static void mmap_filters_free_all(void)
+{
+    struct mmap_filter *filter;
+    struct list_head *pos, *n;
+
+    list_for_each_safe(pos, n, &mmap_filters) {
+        filter = list_entry(pos, struct mmap_filter, node);
+        list_del(pos);
+        vfree(filter);
+    }
 }
 
 enum free_huge_page_status {
@@ -517,16 +561,240 @@ err:
 static struct kobj_attribute preloaded_profile_attr =
 __ATTR(preloaded_profile, 0644, preloaded_profile_show, preloaded_profile_store);
 
+static ssize_t mmap_filters_enabled_show(struct kobject *kobj,
+        struct kobj_attribute *attr, char *buf)
+{
+    return sprintf(buf, "%d\n", mm_econ_mmap_filters);
+}
+
+static ssize_t mmap_filters_enabled_store(struct kobject *kobj,
+        struct kobj_attribute *attr,
+        const char *buf, size_t count)
+{
+    int en;
+    int ret;
+
+    ret = kstrtoint(buf, 0, &en);
+
+    if (ret != 0) {
+        mm_econ_mmap_filters = 0;
+        return ret;
+    }
+    else if (en >= 0 && en <= 1) {
+        mm_econ_mmap_filters = en;
+        return count;
+    }
+    else {
+        mm_econ_mmap_filters = 0;
+        return -EINVAL;
+    }
+}
+static struct kobj_attribute mmap_filters_enabled_attr =
+__ATTR(mmap_filters_enabled, 0644, mmap_filters_enabled_show,
+    mmap_filters_enabled_store);
+
+static char mmap_comparator_get_char(enum mmap_comparator comp)
+{
+    if (comp == CompEquals) {
+        return '=';
+    } else if (comp == CompGreaterThan) {
+        return '>';
+    } else if (comp == CompLessThan) {
+        return '<';
+    } else if (comp == CompIgnore) {
+        return ' ';
+    } else {
+        printk(KERN_WARNING "Invalid mmap comparator");
+        BUG();
+    }
+}
+
+static ssize_t mmap_filters_show(struct kobject *kobj,
+        struct kobj_attribute *attr, char *buf)
+{
+    ssize_t count = 0;
+    struct mmap_filter *filter;
+
+    // First, print the CSV Header for easier reading
+    count = sprintf(buf, "ADDR_COMP,ADDR,LEN_COMP,LEN,PROT_COMP,PROT,\
+                    FLAGS_COMP,FLAGS,FD_COMP,FD,OFF_COMP,OFF");
+
+    // Print out all of the filters
+    list_for_each_entry(filter, &mmap_filters, node) {
+        char comp_addr = mmap_comparator_get_char(filter->addr.comp);
+        u64 addr = filter->addr.val;
+        char comp_len = mmap_comparator_get_char(filter->len.comp);
+        u64 len = filter->len.val;
+        char comp_prot = mmap_comparator_get_char(filter->prot.comp);
+        u64 prot = filter->prot.val;
+        char comp_flags = mmap_comparator_get_char(filter->flags.comp);
+        u64 flags = filter->flags.val;
+        char comp_fd = mmap_comparator_get_char(filter->fd.comp);
+        u64 fd = filter->fd.val;
+        char comp_off = mmap_comparator_get_char(filter->off.comp);
+        u64 off = filter->off.val;
+    
+        // We will keep on adding to the string, so replace the null terminator
+        // with a newline
+        buf[count++] = '\n';
+
+        count += sprintf(&buf[count],
+                    "%c,0x%llx,%c,0x%llx,%c,0x%llx,%c,0x%llx,%c,0x%llx,%c,0x%llx",
+                    comp_addr, addr, comp_len, len, comp_prot, prot,
+                    comp_flags, flags, comp_fd, fd, comp_off, off);
+    }
+
+    return count;
+}
+
+static int get_mmap_comparator(char *buf, enum mmap_comparator *comp)
+{
+    int ret = 0;
+
+    if (strcmp(buf, "=") == 0) {
+        *comp = CompEquals;
+    } else if (strcmp(buf, ">") == 0) {
+        *comp = CompGreaterThan;
+    } else if (strcmp(buf, "<") == 0) {
+        *comp = CompLessThan;
+    } else if (buf[0] == '\0') {
+        // If there was nothing before the , that means this wuantity
+        // should be ignored
+        *comp = CompIgnore;
+    } else {
+        ret = -1;
+    }
+
+    return ret;
+}
+
+static int mmap_filter_read_quantity(char **tok, struct mmap_quantity *q,
+        bool last_in_row)
+{
+    int ret;
+    u64 value;
+    char *value_buf;
+    char separator[8];
+
+    // Rows are terminated by new lines, other elements are separated by commas
+    if (last_in_row) {
+        sprintf(separator, "\n");
+    } else {
+        sprintf(separator, ",");
+    }
+
+
+    // Get the comparator
+    value_buf = strsep(tok, separator);
+    if (!value_buf) {
+        return -1;
+    }
+
+    ret = get_mmap_comparator(value_buf, &q->comp);
+    if (ret != 0) {
+        return -1;
+    }
+
+    // Get the value
+    value_buf = strsep(tok, separator);
+    if (!value_buf) {
+        return -1;
+    }
+
+    ret = kstrtoull(value_buf, 0, &value);
+    // We're fine with the value being invalid if it's ignored
+    if (ret != 0 && q->comp != CompIgnore) {
+        return -1;
+    }
+
+    q->val = value;
+
+    return 0;
+}
+
+static ssize_t mmap_filters_store(struct kobject *kobj,
+        struct kobj_attribute *attr,
+        const char *buf, size_t count)
+{
+    char *tok = (char *)buf;
+    struct mmap_filter *filter = NULL;
+    ssize_t error = 0;
+    int ret;
+
+    // Free the existing filters
+    mmap_filters_free_all();
+
+    // Read in the filters
+    while (tok) {
+        filter = vmalloc(sizeof(struct profile_range));
+        if (!filter) {
+            error = -ENOMEM;
+            goto err;
+        }
+
+        // Parse the information for the 6 quantities
+        ret = mmap_filter_read_quantity(&tok, &filter->addr, false);
+        if (ret != 0) {
+            error = -EINVAL;
+            goto err;
+        }
+
+        ret = mmap_filter_read_quantity(&tok, &filter->len, false);
+        if (ret != 0) {
+            error = -EINVAL;
+            goto err;
+        }
+
+        ret = mmap_filter_read_quantity(&tok, &filter->prot, false);
+        if (ret != 0) {
+            error = -EINVAL;
+            goto err;
+        }
+
+        ret = mmap_filter_read_quantity(&tok, &filter->flags, false);
+        if (ret != 0) {
+            error = -EINVAL;
+            goto err;
+        }
+
+        ret = mmap_filter_read_quantity(&tok, &filter->fd, false);
+        if (ret != 0) {
+            error = -EINVAL;
+            goto err;
+        }
+
+        ret = mmap_filter_read_quantity(&tok, &filter->off, true);
+        if (ret != 0) {
+            error = -EINVAL;
+            goto err;
+        }
+
+        // Add the new filter to the list
+        list_add(&filter->node, &mmap_filters);
+    }
+
+err:
+    if (filter)
+        vfree (filter);
+    mmap_filters_free_all();
+    return error;
+}
+static struct kobj_attribute mmap_filters_attr =
+__ATTR(mmap_filters, 0644, mmap_filters_show, mmap_filters_store);
+
 static struct attribute *mm_econ_attr[] = {
     &enabled_attr.attr,
     &preloaded_profile_attr.attr,
     &stats_attr.attr,
+    &mmap_filters_enabled_attr.attr,
+    &mmap_filters_attr.attr,
     NULL,
 };
 
 static const struct attribute_group mm_econ_attr_group = {
     .attrs = mm_econ_attr,
 };
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // Init
