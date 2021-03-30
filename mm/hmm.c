@@ -25,6 +25,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/mmu_notifier.h>
 #include <linux/memory_hotplug.h>
+#include <linux/mm_stats.h>
 
 struct hmm_vma_walk {
 	struct hmm_range	*range;
