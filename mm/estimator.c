@@ -57,6 +57,7 @@ struct mmap_filter {
     struct mmap_quantity flags;
     struct mmap_quantity fd;
     struct mmap_quantity off;
+    u64 misses;
 };
 
 // Invariant: none of the ranges overlap!
@@ -616,8 +617,8 @@ static ssize_t mmap_filters_show(struct kobject *kobj,
     struct mmap_filter *filter;
 
     // First, print the CSV Header for easier reading
-    count = sprintf(buf, "ADDR_COMP,ADDR,LEN_COMP,LEN,PROT_COMP,PROT,\
-                    FLAGS_COMP,FLAGS,FD_COMP,FD,OFF_COMP,OFF");
+    count = sprintf(buf, "ADDR_COMP,ADDR,LEN_COMP,LEN,PROT_COMP,PROT,"
+                    "FLAGS_COMP,FLAGS,FD_COMP,FD,OFF_COMP,OFF,MISSES\n");
 
     // Print out all of the filters
     list_for_each_entry(filter, &mmap_filters, node) {
@@ -633,15 +634,17 @@ static ssize_t mmap_filters_show(struct kobject *kobj,
         u64 fd = filter->fd.val;
         char comp_off = mmap_comparator_get_char(filter->off.comp);
         u64 off = filter->off.val;
+        u64 misses = filter->misses;
     
         // We will keep on adding to the string, so replace the null terminator
         // with a newline
-        buf[count++] = '\n';
+//        buf[count++] = '\n';
 
         count += sprintf(&buf[count],
-                    "%c,0x%llx,%c,0x%llx,%c,0x%llx,%c,0x%llx,%c,0x%llx,%c,0x%llx",
+                    "%c,0x%llx,%c,0x%llx,%c,0x%llx,%c,0x%llx,%c,0x%llx,"
+                    "%c,0x%llx,0x%llx\n",
                     comp_addr, addr, comp_len, len, comp_prot, prot,
-                    comp_flags, flags, comp_fd, fd, comp_off, off);
+                    comp_flags, flags, comp_fd, fd, comp_off, off, misses);
     }
 
     return count;
@@ -657,7 +660,7 @@ static int get_mmap_comparator(char *buf, enum mmap_comparator *comp)
         *comp = CompGreaterThan;
     } else if (strcmp(buf, "<") == 0) {
         *comp = CompLessThan;
-    } else if (buf[0] == '\0') {
+    } else if (strcmp(buf, " ") == 0 || buf[0] == '\0') {
         // If there was nothing before the , that means this wuantity
         // should be ignored
         *comp = CompIgnore;
@@ -668,24 +671,14 @@ static int get_mmap_comparator(char *buf, enum mmap_comparator *comp)
     return ret;
 }
 
-static int mmap_filter_read_quantity(char **tok, struct mmap_quantity *q,
-        bool last_in_row)
+static int mmap_filter_read_quantity(char **tok, struct mmap_quantity *q)
 {
-    int ret;
-    u64 value;
+    int ret = 0;
+    u64 value = 0;
     char *value_buf;
-    char separator[8];
-
-    // Rows are terminated by new lines, other elements are separated by commas
-    if (last_in_row) {
-        sprintf(separator, "\n");
-    } else {
-        sprintf(separator, ",");
-    }
-
 
     // Get the comparator
-    value_buf = strsep(tok, separator);
+    value_buf = strsep(tok, ",");
     if (!value_buf) {
         return -1;
     }
@@ -696,7 +689,7 @@ static int mmap_filter_read_quantity(char **tok, struct mmap_quantity *q,
     }
 
     // Get the value
-    value_buf = strsep(tok, separator);
+    value_buf = strsep(tok, ",");
     if (!value_buf) {
         return -1;
     }
@@ -720,12 +713,17 @@ static ssize_t mmap_filters_store(struct kobject *kobj,
     struct mmap_filter *filter = NULL;
     ssize_t error = 0;
     int ret;
+    u64 value;
+    char * value_buf;
 
     // Free the existing filters
     mmap_filters_free_all();
 
     // Read in the filters
     while (tok) {
+        if (tok[0] == '\0') {
+            break;
+        }
         filter = vmalloc(sizeof(struct profile_range));
         if (!filter) {
             error = -ENOMEM;
@@ -733,45 +731,62 @@ static ssize_t mmap_filters_store(struct kobject *kobj,
         }
 
         // Parse the information for the 6 quantities
-        ret = mmap_filter_read_quantity(&tok, &filter->addr, false);
+        ret = mmap_filter_read_quantity(&tok, &filter->addr);
         if (ret != 0) {
             error = -EINVAL;
             goto err;
         }
 
-        ret = mmap_filter_read_quantity(&tok, &filter->len, false);
+        ret = mmap_filter_read_quantity(&tok, &filter->len);
         if (ret != 0) {
             error = -EINVAL;
             goto err;
         }
 
-        ret = mmap_filter_read_quantity(&tok, &filter->prot, false);
+        ret = mmap_filter_read_quantity(&tok, &filter->prot);
         if (ret != 0) {
             error = -EINVAL;
             goto err;
         }
 
-        ret = mmap_filter_read_quantity(&tok, &filter->flags, false);
+        ret = mmap_filter_read_quantity(&tok, &filter->flags);
         if (ret != 0) {
             error = -EINVAL;
             goto err;
         }
 
-        ret = mmap_filter_read_quantity(&tok, &filter->fd, false);
+        ret = mmap_filter_read_quantity(&tok, &filter->fd);
         if (ret != 0) {
             error = -EINVAL;
             goto err;
         }
 
-        ret = mmap_filter_read_quantity(&tok, &filter->off, true);
+        ret = mmap_filter_read_quantity(&tok, &filter->off);
         if (ret != 0) {
             error = -EINVAL;
             goto err;
         }
+
+        // Get the misses for the filter
+        value_buf = strsep(&tok, "\n");
+        if (!value_buf) {
+            error = -EINVAL;
+            goto err;
+        }
+
+        ret = kstrtoull(value_buf, 0, &value);
+        if (ret != 0) {
+            error = -EINVAL;
+            goto err;
+        }
+
+        filter->misses = value;
 
         // Add the new filter to the list
         list_add(&filter->node, &mmap_filters);
     }
+
+    return count;
 
 err:
     if (filter)
