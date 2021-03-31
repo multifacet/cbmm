@@ -110,3 +110,4 @@ obj-$(CONFIG_MEMFD_CREATE) += memfd.o
 obj-$(CONFIG_MAPPING_DIRTY_HELPERS) += mapping_dirty_helpers.o
 obj-$(CONFIG_MM_ECON) += estimator.o
 obj-$(CONFIG_KBADGERD) += kbadgerd/
+obj-$(CONFIG_ASYNCZERO) += asynczero/
