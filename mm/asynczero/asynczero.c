@@ -12,13 +12,16 @@ static struct task_struct *asynczero_task = NULL;
 static volatile bool asynczero_should_stop = false;
 
 int sleep = 1000;
-module_param(sleep, int, 0);
-int count = 10;
-module_param(count, int, 0);
+module_param(sleep, int, 0644);
 
-/* clear the largest order blocks in the buddy allocator */
+int count = 10;
+module_param(count, int, 0644);
+
 int zero_fill_order = MAX_ORDER - 1;
-unsigned long pages_zeroed;
+module_param(zero_fill_order, int, 0644);
+
+u64 pages_zeroed;
+module_param(pages_zeroed, ullong, 0444);
 
 static inline bool skip_zone(struct zone *zone)
 {
@@ -133,7 +136,7 @@ static int asynczero_do_work(void *data)
 
 	pages_zeroed = 0;
 	/* loop forever to check for zeroing opportunity */
-	while (true) {
+	while (!asynczero_should_stop) {
 		for_each_zone(zone) {
 			if (!populated_zone(zone) || skip_zone(zone))
 				continue;
