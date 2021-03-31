@@ -407,6 +407,82 @@ void mm_register_promotion(u64 addr)
     mm_econ_num_hp_promotions += 1;
 }
 
+static bool mm_does_quantity_match(struct mmap_quantity *q, u64 val)
+{
+    if (q->comp == CompEquals) {
+        return val == q->val;
+    } else if (q->comp == CompGreaterThan) {
+        return val > q->val;
+    } else if (q->comp == CompLessThan) {
+        return val < q->val;
+    } else if (q->comp == CompIgnore) {
+        return true;
+    } else {
+        printk(KERN_WARNING "Invalid mmap comparator");
+        BUG();
+    }
+
+    // Should never reach here
+    return false;
+}
+
+// Search mmap_filters for a filter that matches this new memory map
+// and add it to the list of ranges.
+// retaddr: The actual address the new mmap is mapped to
+// addr: The hint from the caller for what address the new mmap should be mapped to
+// len: The length of the new mmap
+// prot: The protection bits for the mmap
+// flags: The flags specified in the mmap call
+// fd: Descriptor of the file to map
+// off: Offset within the file to start the mapping
+// Do we need to lock mmap_filters?
+void mm_add_mmap(u64 retaddr, u64 addr, u64 len, u64 prot, u64 flags,
+        u64 fd, u64 off)
+{
+    struct mmap_filter *filter;
+    struct profile_range *range = NULL;
+    bool passes_filter;
+    // Have misses default to zero is no filters match
+    u64 misses = 0;
+
+    if (!mm_econ_mmap_filters)
+        return;
+
+    // Maybe add checks for the right process here
+
+    // Check if this mmap matches any of our filters
+    list_for_each_entry(filter, &mmap_filters, node) {
+        // Start off assuming the filter matches
+        passes_filter = true;
+
+        passes_filter = passes_filter && mm_does_quantity_match(&filter->addr, addr);
+        passes_filter = passes_filter && mm_does_quantity_match(&filter->len, len);
+        passes_filter = passes_filter && mm_does_quantity_match(&filter->prot, prot);
+        passes_filter = passes_filter && mm_does_quantity_match(&filter->flags, flags);
+        passes_filter = passes_filter && mm_does_quantity_match(&filter->fd, fd);
+        passes_filter = passes_filter && mm_does_quantity_match(&filter->off, off);
+
+        if (passes_filter) {
+            misses = filter->misses;
+            break;
+        }
+    }
+
+    // Do range overlapping logic here
+
+    // Add the memory range of the mmap to the tree of ranges
+    range = vmalloc(sizeof(struct profile_range));
+    if (!range) {
+        pr_warn("mm_add_mmap: no memory for new range");
+        return;
+    }
+    range->start = retaddr;
+    range->end = retaddr + len;
+    range->misses = misses;
+
+    profile_range_insert(range);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // sysfs files
 
