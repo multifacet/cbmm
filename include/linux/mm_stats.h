@@ -132,6 +132,9 @@ enum mm_stats_pf_flags {
 	// Set: the physical memory allocator slowpath executed page compaction.
 	MM_STATS_PF_ALLOC_FALLBACK_COMPACT,
 
+	// Set: the physical memory allocator allocated a pre-zeroed page for a request with GFP_ZERO.
+	MM_STATS_PF_ALLOC_PREZEROED,
+
 	// NOTE: must be the last value in the enum... not actually a flag.
 	MM_STATS_NUM_FLAGS,
 };
@@ -147,6 +150,7 @@ DECLARE_PER_CPU(bool, pftrace_alloc_fallback_reclaim);
 DECLARE_PER_CPU(bool, pftrace_alloc_fallback_compact);
 DECLARE_PER_CPU(bool, pftrace_alloc_zeroed_page);
 DECLARE_PER_CPU(u64, pftrace_alloc_zeroing_duration);
+DECLARE_PER_CPU(bool, pftrace_alloc_prezeroed);
 
 static inline void mm_stats_set_flag(
 		struct mm_stats_pftrace *trace,
@@ -183,6 +187,9 @@ static inline void mm_stats_check_alloc_fallback(
 	}
 	if (get_cpu_var(pftrace_alloc_fallback_compact)) {
 		mm_stats_set_flag(trace, MM_STATS_PF_ALLOC_FALLBACK_COMPACT);
+	}
+	if (get_cpu_var(pftrace_alloc_prezeroed)) {
+		mm_stats_set_flag(trace, MM_STATS_PF_ALLOC_PREZEROED);
 	}
 }
 

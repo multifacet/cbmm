@@ -109,6 +109,7 @@ DEFINE_PER_CPU(bool, pftrace_alloc_fallback_compact);
 // markm: ditto but to check if we zeroed a page and how long it took.
 DEFINE_PER_CPU(bool, pftrace_alloc_zeroed_page);
 DEFINE_PER_CPU(u64, pftrace_alloc_zeroing_duration);
+DEFINE_PER_CPU(bool, pftrace_alloc_prezeroed);
 
 /* work_structs for global per-cpu drains */
 struct pcpu_drain {
@@ -1129,13 +1130,17 @@ static void kernel_init_free_pages(struct page *page, int numpages)
 {
 	int i;
 	u64 start = rdtsc();
+	bool prezeroed = false;
 
 	for (i = 0; i < numpages; i++)
-		if (!PageZeroed(page + i))
+		if (PageZeroed(page + i))
+			prezeroed = true;
+		else
 			clear_highpage(page + i);
 
 	get_cpu_var(pftrace_alloc_zeroed_page) = true;
 	get_cpu_var(pftrace_alloc_zeroing_duration) = rdtsc() - start;
+	get_cpu_var(pftrace_alloc_prezeroed) = prezeroed;
 }
 
 static __always_inline bool free_pages_prepare(struct page *page,
@@ -4752,6 +4757,7 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	get_cpu_var(pftrace_alloc_fallback_reclaim) = false;
 	get_cpu_var(pftrace_alloc_fallback_compact) = false;
 	get_cpu_var(pftrace_alloc_zeroed_page) = false;
+	get_cpu_var(pftrace_alloc_prezeroed) = false;
 
 	/*
 	 * There are several places where we assume that the order value is sane

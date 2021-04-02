@@ -341,6 +341,7 @@ char *mm_stats_pf_flags_names[MM_STATS_NUM_FLAGS] = {
 	[MM_STATS_PF_HUGE_COPY] = "MM_STATS_PF_HUGE_COPY",
 	[MM_STATS_PF_CLEARED_MEM] = "MM_STATS_PF_CLEARED_MEM",
 	[MM_STATS_PF_ALLOC_FALLBACK] = "MM_STATS_PF_ALLOC_FALLBACK",
+        [MM_STATS_PF_ALLOC_PREZEROED] = "MM_STATS_PF_ALLOC_PREZEROED",
 };
 
 // This is the pftrace file, found at "/pftrace". We also keep track of the

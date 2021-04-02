@@ -144,6 +144,7 @@ with_stringify! {
         ALLOC_FALLBACK_RETRY,
         ALLOC_FALLBACK_RECLAIM,
         ALLOC_FALLBACK_COMPACT,
+        ALLOC_PREZEROED,
 
         OTHER, // A hack -- shouldn't actually be in use...
         MM_STATS_NUM_FLAGS,
