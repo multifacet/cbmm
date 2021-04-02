@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config ASYNCZERO
+	tristate "Adds the asynczero module."
+	default m
+	depends on MEMCG && TRANSPARENT_HUGEPAGE
+	help
+	  Adds the asynczero module.
+

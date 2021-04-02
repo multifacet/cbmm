@@ -745,5 +745,6 @@ config MAPPING_DIRTY_HELPERS
         bool
 
 source "mm/kbadgerd/Kconfig"
+source "mm/asynczero/Kconfig"
 
 endmenu
