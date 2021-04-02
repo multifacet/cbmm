@@ -63,6 +63,7 @@
 #include <linux/compat.h>
 #include <linux/vmalloc.h>
 #include <linux/badger_trap.h>
+#include <linux/mm_econ.h>
 
 #include <linux/uaccess.h>
 #include <asm/mmu_context.h>
@@ -1744,6 +1745,7 @@ static int __do_execve_file(int fd, struct filename *filename,
 	char *pathbuf = NULL;
 	struct linux_binprm *bprm;
 	struct files_struct *displaced;
+    struct mm_struct *new_mm;
 	int retval;
 
 	if (IS_ERR(filename))
@@ -1858,6 +1860,16 @@ static int __do_execve_file(int fd, struct filename *filename,
 		putname(filename);
 	if (displaced)
 		put_files_struct(displaced);
+
+    // Bijan: If exec succeded, check if this is the process we want to track
+    new_mm = current->mm;
+    mm_profile_register_process(current->comm, current->tgid);
+    mm_add_mmap(current->tgid, SectionCode, new_mm->start_code, 0,
+        new_mm->end_code - new_mm->start_code, 0, 0, 0, 0);
+    mm_add_mmap(current->tgid, SectionData, new_mm->start_data, 0,
+        new_mm->end_data - new_mm->start_data, 0, 0, 0, 0);
+    mm_add_mmap(current->tgid, SectionHeap, new_mm->start_brk, 0,
+        new_mm->brk - new_mm->start_brk, 0, 0, 0, 0);
 	return retval;
 
 out:

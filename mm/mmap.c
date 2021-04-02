@@ -47,6 +47,7 @@
 #include <linux/pkeys.h>
 #include <linux/oom.h>
 #include <linux/sched/mm.h>
+#include <linux/mm_econ.h>
 
 #include <linux/uaccess.h>
 #include <asm/cacheflush.h>
@@ -1644,6 +1645,8 @@ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
 
 	retval = vm_mmap_pgoff(file, addr, len, prot, flags, pgoff);
+    // Bijan: Potentially add this mmap to the tracked process's profile
+    mm_add_mmap(current->tgid, SectionMmap, retval, addr, len, prot, flags, fd, pgoff);
 out_fput:
 	if (file)
 		fput(file);
