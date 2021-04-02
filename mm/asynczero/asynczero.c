@@ -9,9 +9,7 @@
 #include <asm/page_64.h>
 
 #define list_last_entry_or_null(ptr, type, member) ({ \
-	type *__entry = \
-		list_first_entry_or_null(ptr, type, member); \
-	__entry ? list_prev_entry(__entry, member)  : NULL; \
+	list_empty(ptr) ? NULL : list_last_entry(ptr, type, member) ;\
 })
 
 static struct task_struct *asynczero_task = NULL;
@@ -66,7 +64,8 @@ static inline void zero_fill_page_ntstores(struct page *page)
 		"pop %%rdi;"
 		"pop %%rcx;"
 		"pop %%rax;"
-		:: "a" (kaddr)
+		: /* output */
+		: "a" (kaddr)
 	);
 	kunmap_atomic(kaddr);
 }
