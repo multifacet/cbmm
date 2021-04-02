@@ -167,21 +167,45 @@ print_profile(void)
     pr_warn("mm_econ: END profile...");
 }
 
-static bool
+enum free_huge_page_status {
+    fhps_none, // no free huge pages
+    fhps_free, // huge pages are available
+    fhps_zeroed, // huge pages are available and prezeroed!
+};
+
+static enum free_huge_page_status
 have_free_huge_pages(void)
 {
     struct zone *zone;
+    struct page *page;
+    struct free_area *area;
     int order;
+    unsigned long flags;
+    bool is_free = false, is_zeroed = false;
 
     for_each_populated_zone(zone) {
-	for (order = HUGE_PAGE_ORDER; order < MAX_ORDER; ++order) {
-            if (zone->free_area[order].nr_free > 0) {
-                return true;
+        for (order = HUGE_PAGE_ORDER; order < MAX_ORDER; ++order) {
+            area = &(zone->free_area[order]);
+            is_free = area->nr_free > 0;
+
+            if (is_free) {
+                spin_lock_irqsave(&zone->lock, flags);
+
+                page = list_first_entry_or_null(
+                        &area->free_list[MIGRATE_MOVABLE], struct page,
+                        lru);
+                is_zeroed = page && PageZeroed(page);
+
+                spin_unlock_irqrestore(&zone->lock, flags);
+
+                break;
             }
         }
     }
 
-    return false;
+    return is_zeroed ? fhps_zeroed :
+        is_free ? fhps_free :
+        fhps_none;
 }
 
 static u64
@@ -226,10 +250,11 @@ mm_estimate_huge_page_promote_cost_benefit(
     // TODO: Assume allocation is free if we have free huge pages.
     // TODO: Assume we don't care what node it is on...
     // TODO: Maybe account for opportunity cost as rate/ratio?
-    const u64 alloc_cost = have_free_huge_pages() ? 0 : (1ul << 32);
+    const enum free_huge_page_status fhps = have_free_huge_pages();
+    const u64 alloc_cost = fhps > fhps_none ? 0 : (1ul << 32);
 
     // TODO: Assume constant prep costs (zeroing or copying).
-    const u64 prep_cost = 60 * 2000; // ~60us
+    const u64 prep_cost = fhps > fhps_free ? 0 : 100 * 2000; // ~100us
 
     // Compute total cost.
     cost->cost = alloc_cost + prep_cost;
