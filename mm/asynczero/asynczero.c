@@ -8,6 +8,8 @@
 #include <linux/sched/task.h>
 #include <asm/page_64.h>
 
+#define HUGE_PAGE_ORDER 9
+
 #define list_last_entry_or_null(ptr, type, member) ({ \
 	list_empty(ptr) ? NULL : list_last_entry(ptr, type, member) ;\
 })
@@ -21,10 +23,10 @@ module_param(sleep, int, 0644);
 int count = 10;
 module_param(count, int, 0644);
 
-int zero_fill_order = MAX_ORDER - 1;
-module_param(zero_fill_order, int, 0644);
+//int zero_fill_order = MAX_ORDER - 1;
+//module_param(zero_fill_order, int, 0644);
 
-u64 pages_zeroed;
+u64 pages_zeroed = 0;
 module_param(pages_zeroed, ullong, 0444);
 
 static inline bool skip_zone(struct zone *zone)
@@ -85,8 +87,8 @@ static inline void zero_fill_compound_page(struct page *page, int order)
 		/* custom zero-filling logic */
 		zero_fill_page_ntstores(page + i);
 	}
-	//pages_zeroed += (1 << order);
-	pages_zeroed++;
+
+	pages_zeroed += 1 << order;
 	SetPageZeroed(page);
 }
 
@@ -96,60 +98,60 @@ static void zero_fill_zone_pages(struct zone *zone)
 	struct free_area *area;
 	unsigned long flags;
 	unsigned long retries = 0;
+	int order;
 
-	while (retries < 100) {
-		/* remove one page with the lock held */
-		spin_lock_irqsave(&zone->lock, flags);
-		area = &(zone->free_area[zero_fill_order]);
-		page = list_last_entry_or_null(&area->free_list[MIGRATE_MOVABLE],
-				struct page, lru);
-		if (!page) {
-			//printk(KERN_ERR"no suitable page found for zeroing\n");
-			spin_unlock_irqrestore(&zone->lock, flags);
-			break;;
-		}
-		if (PageZeroed(page)) {
-			retries++;
-			/* move this page to the tail */
+        for (order = HUGE_PAGE_ORDER; order < MAX_ORDER; ++order) {
+		area = &(zone->free_area[order]);
+
+		while (retries < 100) {
+			/* remove one page from freelist with the lock held */
+			spin_lock_irqsave(&zone->lock, flags);
+			page = list_last_entry_or_null(&area->free_list[MIGRATE_MOVABLE],
+					struct page, lru);
+			if (!page) {
+				spin_unlock_irqrestore(&zone->lock, flags);
+				break;;
+			}
+			if (PageZeroed(page)) {
+				retries++;
+				list_del(&page->lru);
+				list_add(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
+				spin_unlock_irqrestore(&zone->lock, flags);
+				continue;
+			}
 			list_del(&page->lru);
-			list_add(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
+			area->nr_free--;
 			spin_unlock_irqrestore(&zone->lock, flags);
-			continue;
+
+			// zero fill
+			zero_fill_compound_page(page, order);
+
+			// add back to freelist
+			spin_lock_irqsave(&zone->lock, flags);
+			list_add(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
+			area->nr_free++;
+			spin_unlock_irqrestore(&zone->lock, flags);
+
+			if (pages_zeroed % count == 0)
+				msleep(sleep);
 		}
-		list_del(&page->lru);
-		area->nr_free--;
-		spin_unlock_irqrestore(&zone->lock, flags);
-
-		/* take the desired action here (zero fill in this case) */
-		zero_fill_compound_page(page, zero_fill_order);
-
-		/* add the page back to free list but at the tail */
-		spin_lock_irqsave(&zone->lock, flags);
-		list_add(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
-		area->nr_free++;
-		spin_unlock_irqrestore(&zone->lock, flags);
-		if (pages_zeroed % count == 0)
-			msleep(sleep);
 	}
-	/* sleep unconditionally to avoid unnnecessary looping */
-	msleep(sleep);
 }
 
 static int asynczero_do_work(void *data)
 {
 	struct zone *zone;
 
-	pages_zeroed = 0;
-	/* loop forever to check for zeroing opportunity */
 	while (!asynczero_should_stop) {
 		for_each_zone(zone) {
 			if (!populated_zone(zone) || skip_zone(zone))
 				continue;
 
 			zero_fill_zone_pages(zone);
+			msleep(sleep);
 		}
-		//trace_printk("Pages zeroed: %ld\n", pages_zeroed);
 	}
+
 	return 0;
 }
 
