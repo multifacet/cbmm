@@ -8,6 +8,12 @@
 #include <linux/sched/task.h>
 #include <asm/page_64.h>
 
+#define list_last_entry_or_null(ptr, type, member) ({ \
+	type *__entry = \
+		list_first_entry_or_null(ptr, type, member); \
+	__entry ? list_prev_entry(__entry, member)  : NULL; \
+})
+
 static struct task_struct *asynczero_task = NULL;
 static volatile bool asynczero_should_stop = false;
 
@@ -96,7 +102,7 @@ static void zero_fill_zone_pages(struct zone *zone)
 		/* remove one page with the lock held */
 		spin_lock_irqsave(&zone->lock, flags);
 		area = &(zone->free_area[zero_fill_order]);
-		page = list_first_entry_or_null(&area->free_list[MIGRATE_MOVABLE],
+		page = list_last_entry_or_null(&area->free_list[MIGRATE_MOVABLE],
 				struct page, lru);
 		if (!page) {
 			//printk(KERN_ERR"no suitable page found for zeroing\n");
@@ -107,7 +113,7 @@ static void zero_fill_zone_pages(struct zone *zone)
 			retries++;
 			/* move this page to the tail */
 			list_del(&page->lru);
-			list_add_tail(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
+			list_add(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
 			spin_unlock_irqrestore(&zone->lock, flags);
 			continue;
 		}
@@ -120,7 +126,7 @@ static void zero_fill_zone_pages(struct zone *zone)
 
 		/* add the page back to free list but at the tail */
 		spin_lock_irqsave(&zone->lock, flags);
-		list_add_tail(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
+		list_add(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
 		area->nr_free++;
 		spin_unlock_irqrestore(&zone->lock, flags);
 		if (pages_zeroed % count == 0)
