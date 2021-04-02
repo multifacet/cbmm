@@ -2050,6 +2050,10 @@ static inline void expand(struct zone *zone, struct page *page,
 		size >>= 1;
 		VM_BUG_ON_PAGE(bad_range(zone, &page[size]), &page[size]);
 
+		// propagate the zeroed flag to subdivisions.
+		if (PageZeroed(page))
+			SetPageZeroed(&page[size]);
+
 		/*
 		 * Mark as guard pages (or page), that will allow to
 		 * merge back to allocator when buddy will be freed.
