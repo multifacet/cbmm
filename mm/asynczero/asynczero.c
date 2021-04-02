@@ -70,6 +70,7 @@ static inline void zero_fill_page_ntstores(struct page *page)
 		: "a" (kaddr)
 	);
 	kunmap_atomic(kaddr);
+	SetPageZeroed(page);
 }
 
 /* the core logic to zero-fill a compound page */
@@ -89,7 +90,6 @@ static inline void zero_fill_compound_page(struct page *page, int order)
 	}
 
 	pages_zeroed += 1 << order;
-	SetPageZeroed(page);
 }
 
 static void zero_fill_zone_pages(struct zone *zone)
