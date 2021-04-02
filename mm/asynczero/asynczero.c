@@ -97,10 +97,11 @@ static void zero_fill_zone_pages(struct zone *zone)
 	struct page *page;
 	struct free_area *area;
 	unsigned long flags;
-	unsigned long retries = 0;
 	int order;
+	u64 old_nzeroed = pages_zeroed;
 
         for (order = HUGE_PAGE_ORDER; order < MAX_ORDER; ++order) {
+		unsigned long retries = 0;
 		area = &(zone->free_area[order]);
 
 		while (retries < 100) {
@@ -132,8 +133,10 @@ static void zero_fill_zone_pages(struct zone *zone)
 			area->nr_free++;
 			spin_unlock_irqrestore(&zone->lock, flags);
 
-			if (pages_zeroed % count == 0)
+			if (pages_zeroed - old_nzeroed > count) {
 				msleep(sleep);
+				old_nzeroed = pages_zeroed;
+			}
 		}
 	}
 }
