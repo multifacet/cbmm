@@ -423,9 +423,11 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
 // action associated with `cost` should be TAKEN, and false otherwise.
 bool mm_decide(const struct mm_cost_delta *cost)
 {
+    printk("ajdflkasjfklas");
     spin_lock(&process_pid_lock);
     // Only track a new process if we aren't currently tracking one
     if (mm_econ_mmap_filters && process_pid != current->tgid) {
+        printk("mm_decide: %d %d %d %d\n", mm_econ_mode, mm_econ_mmap_filters, process_pid, current->tgid);
         spin_unlock(&process_pid_lock);
         return false;
     }
@@ -434,11 +436,12 @@ bool mm_decide(const struct mm_cost_delta *cost)
     mm_econ_num_decisions += 1;
 
     if (mm_econ_mode == 0) {
+        printk("test 2");
         return true;
     } else if (mm_econ_mode == 1) {
         mm_econ_num_decisions_yes += 1;
 
-        //pr_warn("mm_econ: cost=%llu benefit=%llu\n", cost->cost, cost->benefit); // TODO remove
+        pr_warn("mm_econ: cost=%llu benefit=%llu\n", cost->cost, cost->benefit); // TODO remove
         return cost->benefit > cost->cost;
     } else {
         BUG();
