@@ -76,7 +76,7 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost);
 void mm_register_promotion(u64 addr);
 
 void
-mm_add_mmap(pid_t pid, enum mm_memory_section section, u64 retaddr, u64 addr,
+mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 retaddr, u64 addr,
         u64 len, u64 prot, u64 flags, u64 fd, u64 off);
 
 void mm_profile_register_process(char *comm, pid_t pid);

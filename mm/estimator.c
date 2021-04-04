@@ -474,6 +474,7 @@ static bool mm_does_quantity_match(struct mmap_quantity *q, u64 val)
 // Search mmap_filters for a filter that matches this new memory map
 // and add it to the list of ranges.
 // pid: The pid of the process who made this mmap
+// section: The memory section the memory range belongs to: code, data, heap, or mmap
 // retaddr: The actual address the new mmap is mapped to
 // addr: The hint from the caller for what address the new mmap should be mapped to
 // len: The length of the new mmap
@@ -483,7 +484,7 @@ static bool mm_does_quantity_match(struct mmap_quantity *q, u64 val)
 // off: Offset within the file to start the mapping
 // Do we need to lock mmap_filters?
 // We might need to lock the profile_ranges rb_tree
-void mm_add_mmap(pid_t pid, enum mm_memory_section section, u64 retaddr, u64 addr,
+void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 retaddr, u64 addr,
         u64 len, u64 prot, u64 flags, u64 fd, u64 off)
 {
     struct mmap_filter *filter;
@@ -533,7 +534,7 @@ void mm_add_mmap(pid_t pid, enum mm_memory_section section, u64 retaddr, u64 add
     range->misses = misses;
 
     while (!profile_range_insert(range));
-    printk("Added range %d %llx %llx %lld %llx\n", section, range->start, range->end, range->misses, len);
+    //printk("Added range %d %llx %llx %lld %llx\n", section, range->start, range->end, range->misses, len);
 }
 
 void mm_profile_register_process(char *comm, pid_t pid)
