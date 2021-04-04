@@ -3089,6 +3089,10 @@ out:
 	if (flags & VM_LOCKED)
 		mm->locked_vm += (len >> PAGE_SHIFT);
 	vma->vm_flags |= VM_SOFTDIRTY;
+
+    // Bijan: If we expand the heap, add the new section to the tracked
+    // process's profile
+    mm_add_mmap(current->tgid, SectionHeap, addr, 0, len, 0, 0, 0, 0);
 	return 0;
 }
 
