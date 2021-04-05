@@ -14,7 +14,7 @@
 	list_empty(ptr) ? NULL : list_last_entry(ptr, type, member) ;\
 })
 
-static struct task_struct *asynczero_task = NULL;
+static struct task_struct *asynczero_task[MAX_NUMNODES];
 static volatile bool asynczero_should_stop = false;
 
 int sleep = 1000;
@@ -143,10 +143,18 @@ static void zero_fill_zone_pages(struct zone *zone)
 
 static int asynczero_do_work(void *data)
 {
+	int nid = (int)(long) data;
 	struct zone *zone;
+	struct zoneref *z;
+	struct zonelist *zonelist = node_zonelist(nid, __GFP_THISNODE);
+	enum zone_type high_zoneidx = gfp_zone(GFP_ZONEMASK);
+	nodemask_t nodemask = nodemask_of_node(nid);
 
 	while (!asynczero_should_stop) {
-		for_each_zone(zone) {
+		for_each_zone_zonelist_nodemask(
+				zone, z, zonelist,
+				high_zoneidx, &nodemask)
+		{
 			if (!populated_zone(zone) || skip_zone(zone))
 				continue;
 
@@ -158,17 +166,37 @@ static int asynczero_do_work(void *data)
 	return 0;
 }
 
+static int asynczero_start(int nid)
+{
+	struct task_struct **t = &asynczero_task[nid];
+
+	*t = kthread_run(asynczero_do_work, (void*)(long)nid, "kasynczerod%d", nid);
+	if (IS_ERR(*t)) {
+		int err = PTR_ERR(*t);
+		*t = NULL;
+		return err;
+	}
+
+	return 0;
+}
+
 int init_module(void)
 {
+	int nid;
 	int err;
+	int i;
 
 	asynczero_should_stop = false;
-	asynczero_task = kthread_run(asynczero_do_work, NULL, "kasynczerod");
 
-	if (IS_ERR(asynczero_task)) {
-		err = PTR_ERR(asynczero_task);
-		asynczero_task = NULL;
-		return err;
+	// Zero them out for debugging...
+	for (i = 0; i < MAX_NUMNODES; ++i)
+		asynczero_task[i] = NULL;
+
+	// Start a kthread for each numa node.
+	for_each_node_state(nid, N_MEMORY) {
+		err = asynczero_start(nid);
+		if (err != 0)
+			pr_err("asynczero: unable to start on node %d\n", nid);
 	}
 
 	return 0;
@@ -176,10 +204,13 @@ int init_module(void)
 
 void cleanup_module(void)
 {
-	if (asynczero_task) {
-		asynczero_should_stop = true;
-		kthread_stop(asynczero_task);
-	}
+	int nid;
+
+	asynczero_should_stop = true;
+
+	for_each_node_state(nid, N_MEMORY)
+		if (asynczero_task[nid])
+			kthread_stop(asynczero_task[nid]);
 
 	printk(KERN_INFO"asynczero: exiting\n");
 }
