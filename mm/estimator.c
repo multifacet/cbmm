@@ -319,7 +319,7 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
             cost->benefit = 0;
             break;
 
-        case MM_ACTION_ALLOC_RECLAIM:
+        case MM_ACTION_ALLOC_RECLAIM: // Alloc reclaim for thp allocation.
             // Estimate the cost/benefit of the promotion itself.
             mm_estimate_huge_page_promote_cost_benefit(action, cost);
             // Update the cost if we also need to do reclaim.

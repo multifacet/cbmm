@@ -1079,7 +1079,9 @@ static vm_fault_t __do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 	}
 
 	pftrace->prep_start_tsc = rdtsc();
-	if(!PageZeroed(page))
+	if(PageZeroed(page))
+		mm_stats_set_flag(pftrace, MM_STATS_PF_ALLOC_PREZEROED);
+	else
 		clear_huge_page(page, vmf->address, HPAGE_PMD_NR);
 	pftrace->prep_end_tsc = rdtsc();
 	/*
