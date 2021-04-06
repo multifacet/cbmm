@@ -147,7 +147,7 @@ static int asynczero_do_work(void *data)
 	struct zone *zone;
 	struct zoneref *z;
 	struct zonelist *zonelist = node_zonelist(nid, __GFP_THISNODE);
-	enum zone_type high_zoneidx = gfp_zone(GFP_ZONEMASK);
+	enum zone_type high_zoneidx = ZONE_MOVABLE;
 	nodemask_t nodemask = nodemask_of_node(nid);
 
 	while (!asynczero_should_stop) {
