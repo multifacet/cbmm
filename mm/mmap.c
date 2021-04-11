@@ -1645,9 +1645,11 @@ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
 
 	retval = vm_mmap_pgoff(file, addr, len, prot, flags, pgoff);
-	// Bijan: Potentially add this mmap to the tracked process's profile
-	mm_add_memory_range(current->tgid, SectionMmap, retval, addr, len, prot,
-		flags, fd, pgoff);
+	if (retval > 0) {
+		// Bijan: Potentially add this mmap to the tracked process's profile
+		mm_add_memory_range(current->tgid, SectionMmap, retval, addr, len, prot,
+			flags, fd, pgoff);
+	}
 out_fput:
 	if (file)
 		fput(file);
