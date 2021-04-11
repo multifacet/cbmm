@@ -24,9 +24,8 @@ static int mm_econ_mmap_filters = 0;
 
 // The comm of the process to track
 static char process_comm[TASK_COMM_LEN];
-// The pid of the process to track
+// The pid of the process to track. Only used with mmap_filters
 static pid_t process_pid = 0;
-static spinlock_t process_pid_lock;
 
 // The Preloaded Profile, if any.
 struct profile_range {
@@ -132,7 +131,7 @@ profile_search(u64 addr)
 
 /*
  * Insert the given range into the profile.
- * If the new range fits entirely with an existing range, the misses variable
+ * If the new range fits entirely within an existing range, the misses variable
  * of the existing range is set to the max of the misses of the new and existing
  * range and true is returned.
  * If the new range partially overlaps an existing range, the misses variable of
@@ -156,7 +155,7 @@ profile_range_insert(struct profile_range *new_range)
             this->misses = max(new_range->misses, this->misses);
             return true;
         }
-        // If the new range partially overlaps with an existing range, set this
+        // If the new range partially overlaps with an existing range, set the
         // misses of the existing range to the max of the two, and update the
         // new range to not include the existing.
         // This doesn't fully work is the new range overlaps with the current
@@ -423,13 +422,10 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
 // action associated with `cost` should be TAKEN, and false otherwise.
 bool mm_decide(const struct mm_cost_delta *cost)
 {
-    spin_lock(&process_pid_lock);
     // Only track a new process if we aren't currently tracking one
     if (mm_econ_mmap_filters && process_pid != current->tgid) {
-        spin_unlock(&process_pid_lock);
         return false;
     }
-    spin_unlock(&process_pid_lock);
 
     mm_econ_num_decisions += 1;
 
@@ -463,7 +459,7 @@ static bool mm_does_quantity_match(struct mmap_quantity *q, u64 val)
     } else if (q->comp == CompIgnore) {
         return true;
     } else {
-        printk(KERN_WARNING "Invalid mmap comparator");
+        pr_err("Invalid mmap comparatori\n");
         BUG();
     }
 
@@ -475,7 +471,7 @@ static bool mm_does_quantity_match(struct mmap_quantity *q, u64 val)
 // and add it to the list of ranges.
 // pid: The pid of the process who made this mmap
 // section: The memory section the memory range belongs to: code, data, heap, or mmap
-// retaddr: The actual address the new mmap is mapped to
+// mapaddr: The actual address the new mmap is mapped to
 // addr: The hint from the caller for what address the new mmap should be mapped to
 // len: The length of the new mmap
 // prot: The protection bits for the mmap
@@ -484,25 +480,22 @@ static bool mm_does_quantity_match(struct mmap_quantity *q, u64 val)
 // off: Offset within the file to start the mapping
 // Do we need to lock mmap_filters?
 // We might need to lock the profile_ranges rb_tree
-void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 retaddr, u64 addr,
+void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr, u64 addr,
         u64 len, u64 prot, u64 flags, u64 fd, u64 off)
 {
     struct mmap_filter *filter;
     struct profile_range *range = NULL;
     bool passes_filter;
-    // Have misses default to zero is no filters match
+    // Have misses default to zero if no filters match
     u64 misses = 0;
 
     if (!mm_econ_mmap_filters)
         return;
 
     // If this isn't the process we care about, move on
-    spin_lock(&process_pid_lock);
     if (process_pid != pid) {
-        spin_unlock(&process_pid_lock);
         return;
     }
-    spin_unlock(&process_pid_lock);
 
     // Check if this mmap matches any of our filters
     list_for_each_entry(filter, &mmap_filters, node) {
@@ -520,8 +513,6 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 retaddr,
         }
     }
 
-    // Do range overlapping logic here
-
     // Add the memory range of the mmap to the tree of ranges
     range = vmalloc(sizeof(struct profile_range));
     if (!range) {
@@ -529,8 +520,8 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 retaddr,
         return;
     }
     // Align the range bounds to a huge page
-    range->start = retaddr & HPAGE_MASK;
-    range->end = (retaddr + len + HPAGE_SIZE - 1) & HPAGE_MASK;
+    range->start = mapaddr & HPAGE_MASK;
+    range->end = (mapaddr + len + HPAGE_SIZE - 1) & HPAGE_MASK;
     range->misses = misses;
 
     while (!profile_range_insert(range));
@@ -539,10 +530,8 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 retaddr,
 
 void mm_profile_register_process(char *comm, pid_t pid)
 {
-    spin_lock(&process_pid_lock);
     // Only track a new process if we aren't currently tracking one
     if (process_pid != 0) {
-        spin_unlock(&process_pid_lock);
         return;
     }
 
@@ -550,20 +539,16 @@ void mm_profile_register_process(char *comm, pid_t pid)
     if (strcmp(process_comm, comm) == 0) {
         process_pid = pid;
     }
-
-    spin_unlock(&process_pid_lock);
 }
 
 void mm_profile_check_exiting_proc(pid_t pid)
 {
-    spin_lock(&process_pid_lock);
     if (process_pid == pid) {
         process_pid = 0;
 
         // If the process exits, we should also clear its profile
         profile_free_all();
     }
-    spin_unlock(&process_pid_lock);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -862,7 +847,9 @@ static int get_mmap_comparator(char *buf, enum mmap_comparator *comp)
     } else if (strcmp(buf, "<") == 0) {
         *comp = CompLessThan;
     } else if (strcmp(buf, " ") == 0 || buf[0] == '\0') {
-        // If there was nothing before the , that means this wuantity
+        // The above condition covers when the ignored option in the CSV
+        // is written as ", ," or ",,"
+        // If there was nothing before the , that means this quantity
         // should be ignored
         *comp = CompIgnore;
     } else {
@@ -925,7 +912,7 @@ static ssize_t mmap_filters_store(struct kobject *kobj,
         if (tok[0] == '\0') {
             break;
         }
-        filter = vmalloc(sizeof(struct profile_range));
+        filter = vmalloc(sizeof(struct mmap_filter));
         if (!filter) {
             error = -ENOMEM;
             goto err;
@@ -1040,7 +1027,6 @@ static struct attribute *mm_econ_attr[] = {
 static const struct attribute_group mm_econ_attr_group = {
     .attrs = mm_econ_attr,
 };
-
 
 ///////////////////////////////////////////////////////////////////////////////
 // Init
