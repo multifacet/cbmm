@@ -129,58 +129,78 @@ profile_search(u64 addr)
     return NULL;
 }
 
+static inline bool
+ranges_overlap(struct profile_range *r1, struct profile_range *r2)
+{
+    return (((r1->start <= r2->start && r2->start < r1->end)
+        || (r2->start <= r1->start && r1->start < r2->end)));
+}
+
+/*
+ * Remove all ranges overlapping with the new range
+ */
+static void remove_overlapping_ranges(struct profile_range *new_range)
+{
+    struct rb_node *node = preloaded_profile.rb_node;
+    struct rb_node *first_overlapping = NULL;
+    struct rb_node *next;
+    struct profile_range *cur_range;
+
+    // First, find the earliest range that overlaps with the new range, if there is any
+    while (node) {
+        cur_range = container_of(node, struct profile_range, node);
+
+
+        if (ranges_overlap(new_range, cur_range)) {
+            first_overlapping = node;
+            // We've found one node that overlaps, but keep going to see if we
+            // can find an earlier one
+            node = node->rb_left;
+            continue;
+        }
+
+        if (new_range->start < cur_range->start)
+            node = node->rb_left;
+        else
+            node = node->rb_right;
+    }
+
+    // If no overlapping range exists, we're done
+    if (!first_overlapping)
+        return;
+
+    // Now we can delete all of the overlapping ranges
+    node = first_overlapping;
+    next = rb_next(node);
+    cur_range = container_of(node, struct profile_range, node);
+    while (ranges_overlap(new_range, cur_range)) {
+        rb_erase(node, &preloaded_profile);
+        vfree(cur_range);
+
+        if (!next)
+            break;
+
+        node = next;
+        next = rb_next(node);
+        cur_range = container_of(node, struct profile_range, node);
+    }
+}
+
 /*
  * Insert the given range into the profile.
- * If the new range fits entirely within an existing range, the misses variable
- * of the existing range is set to the max of the misses of the new and existing
- * range and true is returned.
- * If the new range partially overlaps an existing range, the misses variable of
- * the existing range is set like above, new_range is modified to not overlap with
- * the existing range and false is returned.
- * If new_range does not overlap with any existing ranges, it is added to the rb_tree
- * and true is returned.
+ * If the new range overlaps with any existing ranges, delete the
+ * existing ones as must have been unmapped.
  */
-static bool
+static void
 profile_range_insert(struct profile_range *new_range)
 {
     struct rb_node **new = &(preloaded_profile.rb_node), *parent = NULL;
 
+    remove_overlapping_ranges(new_range);
+
     while (*new) {
         struct profile_range *this =
             container_of(*new, struct profile_range, node);
-
-        // If the new range is entirely within an existing range, let the misses
-        // be the max of the two ranges
-        if (new_range->start >= this->start && new_range->end <= this->end) {
-            this->misses = max(new_range->misses, this->misses);
-            return true;
-        }
-        // If the new range partially overlaps with an existing range, set the
-        // misses of the existing range to the max of the two, and update the
-        // new range to not include the existing.
-        // This doesn't fully work is the new range overlaps with the current
-        // range on both sides
-        else if (new_range->start < this->start && this->start < new_range->end) {
-            this->misses = max(new_range->misses, this->misses);
-            new_range->end = this->start;
-            return false;
-        }
-        else if (this->start <= new_range->start && new_range->start < this->end) {
-            this->misses = max(new_range->misses, this->misses);
-            new_range->start = this->end;
-            return false;
-        }
-
-        /* The ranges should not overlap*/
-//        if (((new_range->start <= this->start && this->start < new_range->end)
-//                    || (this->start <= new_range->start && new_range->start < this->end)))
-//        {
-//            pr_err("mm_econ: Attempted to insert overlapping profile range!\n");
-//            pr_err("mm_econ: old range=[%llx, %llx) new_range=[%llx, %llx)",
-//                    this->start, this->end,
-//                    new_range->start, new_range->end);
-//            return;
-//        }
 
         parent = *new;
         if (new_range->start < this->start)
@@ -193,7 +213,6 @@ profile_range_insert(struct profile_range *new_range)
 
     rb_link_node(&new_range->node, parent, new);
     rb_insert_color(&new_range->node, &preloaded_profile);
-    return true;
 }
 
 static void
@@ -519,12 +538,12 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
         pr_warn("mm_add_mmap: no memory for new range");
         return;
     }
-    // Align the range bounds to a huge page
-    range->start = mapaddr & HPAGE_MASK;
-    range->end = (mapaddr + len + HPAGE_SIZE - 1) & HPAGE_MASK;
+    // Align the range bounds to a page
+    range->start = mapaddr & PAGE_MASK;
+    range->end = (mapaddr + len + PAGE_SIZE - 1) & PAGE_MASK;
     range->misses = misses;
 
-    while (!profile_range_insert(range));
+    profile_range_insert(range);
     //printk("Added range %d %llx %llx %lld %llx\n", section, range->start, range->end, range->misses, len);
 }
 
@@ -689,11 +708,7 @@ static ssize_t preloaded_profile_store(struct kobject *kobj,
 
         range->misses = value;
 
-        if (!profile_range_insert(range)) {
-            pr_err("Attempting to insert overlapping range");
-            error = -EINVAL;
-            goto err;
-        }
+        profile_range_insert(range);
     }
 
     pr_warn("mm_econ: profile set.");
