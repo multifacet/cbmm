@@ -106,6 +106,7 @@ DEFINE_PER_CPU(bool, pftrace_alloc_fallback);
 DEFINE_PER_CPU(bool, pftrace_alloc_fallback_retry);
 DEFINE_PER_CPU(bool, pftrace_alloc_fallback_reclaim);
 DEFINE_PER_CPU(bool, pftrace_alloc_fallback_compact);
+DEFINE_PER_CPU(bool, pftrace_alloc_node_reclaim);
 // markm: ditto but to check if we zeroed a page and how long it took.
 DEFINE_PER_CPU(bool, pftrace_alloc_zeroed_page);
 DEFINE_PER_CPU(u64, pftrace_alloc_zeroing_duration);
@@ -3689,6 +3690,8 @@ retry:
 			    !zone_allows_reclaim(ac->preferred_zoneref->zone, zone))
 				continue;
 
+			get_cpu_var(pftrace_alloc_node_reclaim) = true;
+
 			ret = node_reclaim(zone->zone_pgdat, gfp_mask, order);
 			switch (ret) {
 			case NODE_RECLAIM_NOSCAN:
@@ -4760,6 +4763,7 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	get_cpu_var(pftrace_alloc_fallback_retry) = false;
 	get_cpu_var(pftrace_alloc_fallback_reclaim) = false;
 	get_cpu_var(pftrace_alloc_fallback_compact) = false;
+	get_cpu_var(pftrace_alloc_node_reclaim) = false;
 	get_cpu_var(pftrace_alloc_zeroed_page) = false;
 	get_cpu_var(pftrace_alloc_prezeroed) = false;
 
