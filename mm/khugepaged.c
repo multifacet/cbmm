@@ -1314,7 +1314,7 @@ promote_to_huge(struct mm_struct *mm,
 			/* force */ true, pftrace);
 
 	if (IS_ERR_OR_NULL(hpage)) {
-		pr_warn("hpage is null or error");
+		pr_info("hpage is null or error");
 	} else {
 		put_page(hpage);
 	}
