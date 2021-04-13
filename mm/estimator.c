@@ -654,6 +654,7 @@ static ssize_t preloaded_profile_store(struct kobject *kobj,
 
     // First, free the existing profile.
     profile_free_all();
+    mmap_filters_free_all();
 
     // Try to read in all of the ranges
     while (tok) {
@@ -919,7 +920,8 @@ static ssize_t mmap_filters_store(struct kobject *kobj,
     u64 value;
     char * value_buf;
 
-    // Free the existing filters
+    // Free the existing profiles
+    profile_free_all();
     mmap_filters_free_all();
 
     // Read in the filters
