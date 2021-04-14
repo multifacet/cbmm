@@ -57,6 +57,7 @@ struct mmap_quantity {
 struct mmap_filter {
     struct list_head node;
     enum mm_memory_section section;
+    struct mmap_quantity section_off;
     struct mmap_quantity addr;
     struct mmap_quantity len;
     struct mmap_quantity prot;
@@ -491,6 +492,7 @@ static bool mm_does_quantity_match(struct mmap_quantity *q, u64 val)
 // pid: The pid of the process who made this mmap
 // section: The memory section the memory range belongs to: code, data, heap, or mmap
 // mapaddr: The actual address the new mmap is mapped to
+// section_off: The offset of the memory range from the start of the section it belongs to
 // addr: The hint from the caller for what address the new mmap should be mapped to
 // len: The length of the new mmap
 // prot: The protection bits for the mmap
@@ -499,8 +501,8 @@ static bool mm_does_quantity_match(struct mmap_quantity *q, u64 val)
 // off: Offset within the file to start the mapping
 // Do we need to lock mmap_filters?
 // We might need to lock the profile_ranges rb_tree
-void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr, u64 addr,
-        u64 len, u64 prot, u64 flags, u64 fd, u64 off)
+void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr, u64 section_off,
+        u64 addr, u64 len, u64 prot, u64 flags, u64 fd, u64 off)
 {
     struct mmap_filter *filter;
     struct profile_range *range = NULL;
@@ -519,6 +521,7 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
     // Check if this mmap matches any of our filters
     list_for_each_entry(filter, &mmap_filters, node) {
         passes_filter = section == filter->section;
+        passes_filter = passes_filter && mm_does_quantity_match(&filter->section_off, section_off);
         passes_filter = passes_filter && mm_does_quantity_match(&filter->addr, addr);
         passes_filter = passes_filter && mm_does_quantity_match(&filter->len, len);
         passes_filter = passes_filter && mm_does_quantity_match(&filter->prot, prot);
@@ -797,12 +800,15 @@ static ssize_t mmap_filters_show(struct kobject *kobj,
     struct mmap_filter *filter;
 
     // First, print the CSV Header for easier reading
-    count = sprintf(buf, "SECTION,ADDR_COMP,ADDR,LEN_COMP,LEN,PROT_COMP,PROT,"
-                    "FLAGS_COMP,FLAGS,FD_COMP,FD,OFF_COMP,OFF,MISSES\n");
+    count = sprintf(buf, "SECTION,SECTION_OFF_COMP,SECTION_OFF,ADDR_COMP,ADDR,"
+                    "LEN_COMP,LEN,PROT_COMP,PROT,FLAGS_COMP,FLAGS,FD_COMP,FD,"
+                    "OFF_COMP,OFF,MISSES\n");
 
     // Print out all of the filters
     list_for_each_entry(filter, &mmap_filters, node) {
         char section[8];
+        char comp_section_off = mmap_comparator_get_char(filter->section_off.comp);
+        u64 section_off = filter->section_off.val;
         char comp_addr = mmap_comparator_get_char(filter->addr.comp);
         u64 addr = filter->addr.val;
         char comp_len = mmap_comparator_get_char(filter->len.comp);
@@ -825,9 +831,10 @@ static ssize_t mmap_filters_show(struct kobject *kobj,
 
         count += sprintf(&buf[count],
                     "%s,%c,0x%llx,%c,0x%llx,%c,0x%llx,%c,0x%llx,%c,0x%llx,"
-                    "%c,0x%llx,0x%llx\n",
-                    section, comp_addr, addr, comp_len, len, comp_prot,
-                    prot, comp_flags, flags, comp_fd, fd, comp_off, off, misses);
+                    "%c,0x%llx,%c,0x%llx,0x%llx\n",
+                    section, comp_section_off, section_off, comp_addr, addr,
+                    comp_len, len, comp_prot, prot, comp_flags, flags,
+                    comp_fd, fd, comp_off, off, misses);
     }
 
     return count;
@@ -943,7 +950,13 @@ static ssize_t mmap_filters_store(struct kobject *kobj,
         }
         ret = get_memory_section(value_buf, &filter->section);
 
-        // Parse the information for the 6 quantities
+        // Parse the information for the 7 quantities
+        ret = mmap_filter_read_quantity(&tok, &filter->section_off);
+        if (ret != 0) {
+            error = -EINVAL;
+            goto err;
+        }
+
         ret = mmap_filter_read_quantity(&tok, &filter->addr);
         if (ret != 0) {
             error = -EINVAL;

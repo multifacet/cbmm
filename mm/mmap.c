@@ -1647,8 +1647,9 @@ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 	retval = vm_mmap_pgoff(file, addr, len, prot, flags, pgoff);
 	if (!IS_ERR((void*)retval)) {
 		// Bijan: Potentially add this mmap to the tracked process's profile
-		mm_add_memory_range(current->tgid, SectionMmap, retval, addr, len, prot,
-			flags, fd, pgoff);
+		u64 section_off = retval - current->mm->mmap_base;
+		mm_add_memory_range(current->tgid, SectionMmap, retval, section_off,
+				addr, len, prot, flags, fd, pgoff);
 	}
 out_fput:
 	if (file)
@@ -3030,6 +3031,7 @@ static int do_brk_flags(unsigned long addr, unsigned long len, unsigned long fla
 	pgoff_t pgoff = addr >> PAGE_SHIFT;
 	int error;
 	unsigned long mapped_addr;
+	u64 section_off;
 
 	/* Until we need other flags, refuse anything except VM_EXEC. */
 	if ((flags & (~VM_EXEC)) != 0)
@@ -3095,7 +3097,9 @@ out:
 
 	// Bijan: If we expand the heap, add the new section to the tracked
 	// process's profile
-	mm_add_memory_range(current->tgid, SectionHeap, addr, 0, len, 0, 0, 0, 0);
+	section_off = addr - current->mm->start_brk;
+	mm_add_memory_range(current->tgid, SectionHeap, addr, section_off, 0, len,
+		0, 0, 0, 0);
 	return 0;
 }
 
