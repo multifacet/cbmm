@@ -47,10 +47,23 @@ enum mmap_comparator {
     CompIgnore
 };
 
-// A quantity for filtering an mmap with and how to compare the quantity
-struct mmap_quantity {
-    u64 val;
+// The different quantities that can be compared in an mmap
+enum mmap_quantity {
+    QuantSectionOff,
+    QuantAddr,
+    QuantLen,
+    QuantProt,
+    QuantFlags,
+    QuantFD,
+    QuantOff
+};
+
+// A comaprison for filtering an mmap with and how to compare the quantity
+struct mmap_comparison {
+    struct list_head node;
+    enum mmap_quantity quant;
     enum mmap_comparator comp;
+    u64 val;
 };
 
 // A list of quantities of a mmap to use for deciding if that mmap would
@@ -58,14 +71,8 @@ struct mmap_quantity {
 struct mmap_filter {
     struct list_head node;
     enum mm_memory_section section;
-    struct mmap_quantity section_off;
-    struct mmap_quantity addr;
-    struct mmap_quantity len;
-    struct mmap_quantity prot;
-    struct mmap_quantity flags;
-    struct mmap_quantity fd;
-    struct mmap_quantity off;
     u64 misses;
+    struct list_head comparisons;
 };
 
 // Invariant: none of the ranges overlap!
@@ -260,10 +267,20 @@ print_profile(void)
 static void mmap_filters_free_all(void)
 {
     struct mmap_filter *filter;
+    struct mmap_comparison *comparison;
     struct list_head *pos, *n;
+    struct list_head *cPos, *cN;
 
     list_for_each_safe(pos, n, &mmap_filters) {
         filter = list_entry(pos, struct mmap_filter, node);
+
+        // Free each comparison in this filter
+        list_for_each_safe(cPos, cN, &filter->comparisons) {
+            comparison = list_entry(cPos, struct mmap_comparison, node);
+            list_del(cPos);
+            vfree(comparison);
+        }
+
         list_del(pos);
         vfree(filter);
     }
@@ -567,15 +584,15 @@ void mm_register_promotion(u64 addr)
     mm_econ_num_hp_promotions += 1;
 }
 
-static bool mm_does_quantity_match(struct mmap_quantity *q, u64 val)
+static bool mm_does_quantity_match(struct mmap_comparison *c, u64 val)
 {
-    if (q->comp == CompEquals) {
-        return val == q->val;
-    } else if (q->comp == CompGreaterThan) {
-        return val > q->val;
-    } else if (q->comp == CompLessThan) {
-        return val < q->val;
-    } else if (q->comp == CompIgnore) {
+    if (c->comp == CompEquals) {
+        return val == c->val;
+    } else if (c->comp == CompGreaterThan) {
+        return val > c->val;
+    } else if (c->comp == CompLessThan) {
+        return val < c->val;
+    } else if (c->comp == CompIgnore) {
         return true;
     } else {
         pr_err("Invalid mmap comparatori\n");
@@ -604,8 +621,10 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
         u64 addr, u64 len, u64 prot, u64 flags, u64 fd, u64 off)
 {
     struct mmap_filter *filter;
+    struct mmap_comparison *comp;
     struct profile_range *range = NULL;
     bool passes_filter;
+    u64 val;
     // Have misses default to zero if no filters match
     u64 misses = 0;
 
@@ -620,13 +639,26 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
     // Check if this mmap matches any of our filters
     list_for_each_entry(filter, &mmap_filters, node) {
         passes_filter = section == filter->section;
-        passes_filter = passes_filter && mm_does_quantity_match(&filter->section_off, section_off);
-        passes_filter = passes_filter && mm_does_quantity_match(&filter->addr, addr);
-        passes_filter = passes_filter && mm_does_quantity_match(&filter->len, len);
-        passes_filter = passes_filter && mm_does_quantity_match(&filter->prot, prot);
-        passes_filter = passes_filter && mm_does_quantity_match(&filter->flags, flags);
-        passes_filter = passes_filter && mm_does_quantity_match(&filter->fd, fd);
-        passes_filter = passes_filter && mm_does_quantity_match(&filter->off, off);
+
+        list_for_each_entry(comp, &filter->comparisons, node) {
+            // Determine the value for to use for this comparison
+            if (comp->quant == QuantSectionOff)
+                val = section_off;
+            else if (comp->quant == QuantAddr)
+                val = addr;
+            else if (comp->quant == QuantLen)
+                val = len;
+            else if (comp->quant == QuantProt)
+                val = prot;
+            else if (comp->quant == QuantFlags)
+                val = flags;
+            else if (comp->quant == QuantFD)
+                val = fd;
+            else
+                val = off;
+
+            passes_filter = passes_filter && mm_does_quantity_match(comp, val);
+        }
 
         if (passes_filter) {
             misses = filter->misses;
@@ -892,48 +924,63 @@ static char mmap_comparator_get_char(enum mmap_comparator comp)
     }
 }
 
+static void mmap_quantity_get_str(char *buf, enum mmap_quantity quant)
+{
+    if (quant == QuantSectionOff) {
+        strcpy(buf, "section_off");
+    } else if (quant == QuantAddr) {
+        strcpy(buf, "addr");
+    } else if (quant == QuantLen) {
+        strcpy(buf, "len");
+    } else if (quant == QuantProt) {
+        strcpy(buf, "prot");
+    } else if (quant == QuantFlags) {
+        strcpy(buf, "flags");
+    } else if (quant == QuantFD) {
+        strcpy(buf, "fd");
+    } else if (quant == QuantOff) {
+        strcpy(buf, "off");
+    } else {
+        pr_warn("Invalid mmap quantity");
+        BUG();
+    }
+}
+
 static ssize_t mmap_filters_show(struct kobject *kobj,
         struct kobj_attribute *attr, char *buf)
 {
     ssize_t count = 0;
     struct mmap_filter *filter;
+    struct mmap_comparison *comparison;
 
     // First, print the CSV Header for easier reading
-    count = sprintf(buf, "SECTION,SECTION_OFF_COMP,SECTION_OFF,ADDR_COMP,ADDR,"
-                    "LEN_COMP,LEN,PROT_COMP,PROT,FLAGS_COMP,FLAGS,FD_COMP,FD,"
-                    "OFF_COMP,OFF,MISSES\n");
+    count = sprintf(buf, "SECTION,MISSES,CONSTRAINTS...\n");
 
     // Print out all of the filters
     list_for_each_entry(filter, &mmap_filters, node) {
         char section[8];
-        char comp_section_off = mmap_comparator_get_char(filter->section_off.comp);
-        u64 section_off = filter->section_off.val;
-        char comp_addr = mmap_comparator_get_char(filter->addr.comp);
-        u64 addr = filter->addr.val;
-        char comp_len = mmap_comparator_get_char(filter->len.comp);
-        u64 len = filter->len.val;
-        char comp_prot = mmap_comparator_get_char(filter->prot.comp);
-        u64 prot = filter->prot.val;
-        char comp_flags = mmap_comparator_get_char(filter->flags.comp);
-        u64 flags = filter->flags.val;
-        char comp_fd = mmap_comparator_get_char(filter->fd.comp);
-        u64 fd = filter->fd.val;
-        char comp_off = mmap_comparator_get_char(filter->off.comp);
-        u64 off = filter->off.val;
+        char quantity[16];
         u64 misses = filter->misses;
+        char comparator;
+        u64 val;
 
         mm_memory_section_get_str(section, filter->section);
-    
-        // We will keep on adding to the string, so replace the null terminator
-        // with a newline
-//        buf[count++] = '\n';
 
-        count += sprintf(&buf[count],
-                    "%s,%c,0x%llx,%c,0x%llx,%c,0x%llx,%c,0x%llx,%c,0x%llx,"
-                    "%c,0x%llx,%c,0x%llx,0x%llx\n",
-                    section, comp_section_off, section_off, comp_addr, addr,
-                    comp_len, len, comp_prot, prot, comp_flags, flags,
-                    comp_fd, fd, comp_off, off, misses);
+        // Print the per filter information
+        count += sprintf(&buf[count], "%s,0x%llx", section, misses);
+
+        list_for_each_entry(comparison, &filter->comparisons, node) {
+            mmap_quantity_get_str(quantity, comparison->quant);
+            comparator = mmap_comparator_get_char(comparison->comp);
+            val = comparison->val;
+
+            // Print the per comparison information
+            count += sprintf(&buf[count], ",%s,%c,0x%llx", quantity,
+                comparator, val);
+        }
+
+        // Remember to end with a newline
+        count += sprintf(&buf[count], "\n");
     }
 
     return count;
@@ -951,6 +998,31 @@ static int get_memory_section(char *buf, enum mm_memory_section *section)
         *section = SectionHeap;
     } else if (strcmp(buf, "mmap") == 0) {
         *section = SectionMmap;
+    } else {
+        ret = -1;
+    }
+
+    return ret;
+}
+
+static int get_mmap_quantity(char *buf, enum mmap_quantity *quant)
+{
+    int ret = 0;
+
+    if (strcmp(buf, "section_off") == 0) {
+        *quant = QuantSectionOff;
+    } else if (strcmp(buf, "addr") == 0) {
+        *quant = QuantAddr;
+    } else if (strcmp(buf, "len") == 0) {
+        *quant = QuantLen;
+    } else if (strcmp(buf, "prot") == 0) {
+        *quant = QuantProt;
+    } else if (strcmp(buf, "flags") == 0) {
+        *quant = QuantFlags;
+    } else if (strcmp(buf, "fd") == 0) {
+        *quant = QuantFD;
+    } else if (strcmp(buf, "off") == 0) {
+        *quant = QuantOff;
     } else {
         ret = -1;
     }
@@ -981,11 +1053,19 @@ static int get_mmap_comparator(char *buf, enum mmap_comparator *comp)
     return ret;
 }
 
-static int mmap_filter_read_quantity(char **tok, struct mmap_quantity *q)
+static int mmap_filter_read_comparison(char **tok, struct mmap_comparison *c)
 {
     int ret = 0;
     u64 value = 0;
     char *value_buf;
+
+    // Get the quantity
+    value_buf = strsep(tok, ",");
+    if (!value_buf) {
+        return -1;
+    }
+
+    ret = get_mmap_quantity(value_buf, &c->quant);
 
     // Get the comparator
     value_buf = strsep(tok, ",");
@@ -993,7 +1073,7 @@ static int mmap_filter_read_quantity(char **tok, struct mmap_quantity *q)
         return -1;
     }
 
-    ret = get_mmap_comparator(value_buf, &q->comp);
+    ret = get_mmap_comparator(value_buf, &c->comp);
     if (ret != 0) {
         return -1;
     }
@@ -1006,11 +1086,11 @@ static int mmap_filter_read_quantity(char **tok, struct mmap_quantity *q)
 
     ret = kstrtoull(value_buf, 0, &value);
     // We're fine with the value being invalid if it's ignored
-    if (ret != 0 && q->comp != CompIgnore) {
+    if (ret != 0 && c->comp != CompIgnore) {
         return -1;
     }
 
-    q->val = value;
+    c->val = value;
 
     return 0;
 }
@@ -1019,8 +1099,10 @@ static ssize_t mmap_filters_store(struct kobject *kobj,
         struct kobj_attribute *attr,
         const char *buf, size_t count)
 {
-    char *tok = (char *)buf;
+    char *outerTok = (char *)buf;
+    char *tok = NULL;
     struct mmap_filter *filter = NULL;
+    struct mmap_comparison *comparison = NULL;
     ssize_t error = 0;
     int ret;
     u64 value;
@@ -1031,10 +1113,12 @@ static ssize_t mmap_filters_store(struct kobject *kobj,
     mmap_filters_free_all();
 
     // Read in the filters
-    while (tok) {
+    tok = strsep(&outerTok, "\n");
+    while (outerTok) {
         if (tok[0] == '\0') {
             break;
         }
+
         filter = vmalloc(sizeof(struct mmap_filter));
         if (!filter) {
             error = -ENOMEM;
@@ -1049,51 +1133,8 @@ static ssize_t mmap_filters_store(struct kobject *kobj,
         }
         ret = get_memory_section(value_buf, &filter->section);
 
-        // Parse the information for the 7 quantities
-        ret = mmap_filter_read_quantity(&tok, &filter->section_off);
-        if (ret != 0) {
-            error = -EINVAL;
-            goto err;
-        }
-
-        ret = mmap_filter_read_quantity(&tok, &filter->addr);
-        if (ret != 0) {
-            error = -EINVAL;
-            goto err;
-        }
-
-        ret = mmap_filter_read_quantity(&tok, &filter->len);
-        if (ret != 0) {
-            error = -EINVAL;
-            goto err;
-        }
-
-        ret = mmap_filter_read_quantity(&tok, &filter->prot);
-        if (ret != 0) {
-            error = -EINVAL;
-            goto err;
-        }
-
-        ret = mmap_filter_read_quantity(&tok, &filter->flags);
-        if (ret != 0) {
-            error = -EINVAL;
-            goto err;
-        }
-
-        ret = mmap_filter_read_quantity(&tok, &filter->fd);
-        if (ret != 0) {
-            error = -EINVAL;
-            goto err;
-        }
-
-        ret = mmap_filter_read_quantity(&tok, &filter->off);
-        if (ret != 0) {
-            error = -EINVAL;
-            goto err;
-        }
-
         // Get the misses for the filter
-        value_buf = strsep(&tok, "\n");
+        value_buf = strsep(&tok, ",");
         if (!value_buf) {
             error = -EINVAL;
             goto err;
@@ -1107,8 +1148,35 @@ static ssize_t mmap_filters_store(struct kobject *kobj,
 
         filter->misses = value;
 
+        // Read in the comparisons of the filter
+        INIT_LIST_HEAD(&filter->comparisons);
+        while (tok) {
+            if (tok[0] == '\0')
+                break;
+
+            comparison = vmalloc(sizeof(struct mmap_comparison));
+            if (!comparison) {
+                error = -ENOMEM;
+                vfree (comparison);
+                goto err;
+            }
+
+            ret = mmap_filter_read_comparison(&tok, comparison);
+            if (ret != 0) {
+                error = -EINVAL;
+                vfree (comparison);
+                goto err;
+            }
+
+            // Add the comparison to the list of comparisons
+            list_add(&comparison->node, &filter->comparisons);
+        }
+
         // Add the new filter to the list
         list_add(&filter->node, &mmap_filters);
+
+        // Get the next filter
+        tok = strsep(&outerTok, "\n");
     }
 
     return count;
