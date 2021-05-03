@@ -49,6 +49,11 @@ struct Config {
     /// the trace.
     #[structopt(long)]
     other_category: Option<u64>,
+
+    /// Exclude categories containing the given string from the trace before doing any other
+    /// processing. Note that for PDFs, this will change the proportion of events.
+    #[structopt(long)]
+    exclude: Vec<String>,
 }
 
 arg_enum! {
@@ -181,6 +186,8 @@ impl MMStatsBitflags {
 fn main() -> std::io::Result<()> {
     let config = Config::from_args();
 
+    let excluded_bitmask = compute_excluded_bitmask(&config.exclude);
+
     let rejected = config.rejected_file.as_ref().map(|rejected_fname| {
         let rejected = std::fs::read_to_string(rejected_fname)
             .expect("Unable to read rejection file")
@@ -197,6 +204,7 @@ fn main() -> std::io::Result<()> {
                     count.parse::<u64>().expect("not an integer"),
                 )
             })
+            .filter(|(bits, _)| bits.0 & excluded_bitmask.0 == 0)
             .collect::<Vec<_>>();
 
         (rejected, config.rejection_threshold.unwrap())
@@ -211,22 +219,41 @@ fn main() -> std::io::Result<()> {
     };
 
     if config.pdf {
-        generate_pdfs(&config, &buf, rejected.as_ref());
+        generate_pdfs(&config, &buf, rejected.as_ref(), excluded_bitmask);
     } else {
-        generate_cdfs(&config, &buf, rejected.as_ref());
+        generate_cdfs(&config, &buf, rejected.as_ref(), excluded_bitmask);
     }
 
     Ok(())
+}
+
+fn compute_excluded_bitmask(exclude: &[String]) -> MMStatsBitflags {
+    let mut x = 0u64;
+
+    for i in 0..(MMStatsPftraceFlags::MM_STATS_NUM_FLAGS as u8) {
+        if exclude
+            .iter()
+            .any(|ex| MMStatsPftraceFlags::from_u8(i).name().contains(ex))
+        {
+            x |= 1 << i;
+        }
+    }
+
+    MMStatsBitflags(x)
 }
 
 fn categorize(
     config: &Config,
     buf: &[MMStatsPftrace],
     rejected: Option<&(Vec<(MMStatsBitflags, u64)>, u64)>,
+    excluded_bitmask: MMStatsBitflags,
 ) -> CategorizedData {
     // We categorize events by their bitflags.
     let mut categorized: CategorizedData = BTreeMap::new();
-    for trace in buf {
+    for trace in buf
+        .iter()
+        .filter(|t| t.bitflags.0 & excluded_bitmask.0 == 0)
+    {
         let data = match config.data_mode {
             DataMode::Duration => trace.end_tsc - trace.start_tsc,
             DataMode::AllocTotal => trace.alloc_end_tsc - trace.alloc_start_tsc,
@@ -269,7 +296,11 @@ fn categorize(
         // Create the new histogram.
         let mut other_hist: Histogram<u64> = Histogram::new(5).unwrap();
 
-        for trace in buf.iter().filter(|trace| cats.contains(&trace.bitflags)) {
+        for trace in buf
+            .iter()
+            .filter(|t| t.bitflags.0 & excluded_bitmask.0 == 0)
+            .filter(|trace| cats.contains(&trace.bitflags))
+        {
             let data = match config.data_mode {
                 DataMode::Duration => trace.end_tsc - trace.start_tsc,
                 DataMode::AllocTotal => trace.alloc_end_tsc - trace.alloc_start_tsc,
@@ -334,8 +365,9 @@ fn generate_cdfs(
     config: &Config,
     buf: &[MMStatsPftrace],
     rejected: Option<&(Vec<(MMStatsBitflags, u64)>, u64)>,
+    excluded_bitmask: MMStatsBitflags,
 ) {
-    let categorized = categorize(config, buf, rejected);
+    let categorized = categorize(config, buf, rejected, excluded_bitmask);
 
     // Print output.
     if !config.cli_only {
@@ -390,8 +422,9 @@ fn generate_pdfs(
     config: &Config,
     buf: &[MMStatsPftrace],
     rejected: Option<&(Vec<(MMStatsBitflags, u64)>, u64)>,
+    excluded_bitmask: MMStatsBitflags,
 ) {
-    let categorized = categorize(config, buf, rejected);
+    let categorized = categorize(config, buf, rejected, excluded_bitmask);
 
     // Print output.
     if !config.cli_only {
