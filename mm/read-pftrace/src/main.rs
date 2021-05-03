@@ -320,10 +320,12 @@ fn categorize(
             }
         }
 
-        categorized.insert(
-            MMStatsBitflags(1u64 << (MMStatsPftraceFlags::OTHER as u64)),
-            other_hist,
-        );
+        if !other_hist.is_empty() {
+            categorized.insert(
+                MMStatsBitflags(1u64 << (MMStatsPftraceFlags::OTHER as u64)),
+                other_hist,
+            );
+        }
     }
 
     categorized
