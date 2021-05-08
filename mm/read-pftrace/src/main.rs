@@ -27,7 +27,7 @@ struct Config {
     rejection_threshold: Option<u64>,
 
     /// Output PDF, rather than CDF.
-    #[structopt(long)]
+    #[structopt(long, conflicts_with("percentile"))]
     pdf: bool,
 
     /// Which data to output.
@@ -54,6 +54,10 @@ struct Config {
     /// processing. Note that for PDFs, this will change the proportion of events.
     #[structopt(long)]
     exclude: Vec<String>,
+
+    /// Instead of printing a distribution, print the given percentile for each of set of bitflags.
+    #[structopt(long)]
+    percentile: Option<usize>,
 }
 
 arg_enum! {
@@ -181,6 +185,21 @@ impl MMStatsBitflags {
     pub fn from_hex_str(s: &str) -> Result<Self, std::num::ParseIntError> {
         u64::from_str_radix(s, 16).map(|f| Self(f))
     }
+
+    pub fn name(self) -> String {
+        let name = self
+            .flags()
+            .iter()
+            .map(MMStatsPftraceFlags::name)
+            .collect::<Vec<_>>()
+            .join(",");
+
+        if name.is_empty() {
+            "none".to_string()
+        } else {
+            name
+        }
+    }
 }
 
 fn main() -> std::io::Result<()> {
@@ -218,7 +237,9 @@ fn main() -> std::io::Result<()> {
         aligned
     };
 
-    if config.pdf {
+    if config.percentile.is_some() {
+        generate_percentiles(&config, &buf, rejected.as_ref(), excluded_bitmask);
+    } else if config.pdf {
         generate_pdfs(&config, &buf, rejected.as_ref(), excluded_bitmask);
     } else {
         generate_cdfs(&config, &buf, rejected.as_ref(), excluded_bitmask);
@@ -338,16 +359,7 @@ fn print_quartiles(categorized: &CategorizedData) {
     keys.sort_by_key(|flags| categorized.get(flags).unwrap().len());
     for flags in keys.iter() {
         let hist = categorized.get(flags).unwrap();
-        println!(
-            "{:4X}: {}",
-            flags.0,
-            flags
-                .flags()
-                .iter()
-                .map(MMStatsPftraceFlags::name)
-                .collect::<Vec<_>>()
-                .join(" ")
-        );
+        println!("{:4X}: {}", flags.0, flags.name());
 
         const QUANTILES: &[f64] = &[0.0, 0.25, 0.5, 0.75, 1.0];
 
@@ -361,6 +373,29 @@ fn print_quartiles(categorized: &CategorizedData) {
     }
 
     println!("Total: {}", total);
+}
+
+fn generate_percentiles(
+    config: &Config,
+    buf: &[MMStatsPftrace],
+    rejected: Option<&(Vec<(MMStatsBitflags, u64)>, u64)>,
+    excluded_bitmask: MMStatsBitflags,
+) -> () {
+    let categorized = categorize(config, buf, rejected, excluded_bitmask);
+    let p = config.percentile.unwrap() as f64 / 100.0;
+
+    let mut keys = categorized.keys().collect::<Vec<_>>();
+    keys.sort_by_key(|flags| categorized.get(flags).unwrap().len());
+    for flags in keys.iter() {
+        let hist = categorized.get(flags).unwrap();
+        print!(
+            "{}({}):{} ",
+            flags.name(),
+            hist.len(),
+            hist.value_at_quantile(p)
+        );
+    }
+    println!();
 }
 
 fn generate_cdfs(
@@ -383,20 +418,7 @@ fn generate_cdfs(
     keys.sort_by_key(|flags| categorized.get(flags).unwrap().len());
     for flags in keys.iter() {
         let hist = categorized.get(flags).unwrap();
-        let flags = {
-            let flags = flags
-                .flags()
-                .iter()
-                .map(MMStatsPftraceFlags::name)
-                .collect::<Vec<_>>()
-                .join(",");
-            if flags.is_empty() {
-                "none".into()
-            } else {
-                flags
-            }
-        };
-        print!(" {}({})", flags, hist.len());
+        print!(" {}({})", flags.name(), hist.len());
         for v in (0..=100).map(|p| hist.value_at_quantile((p as f64) / 100.)) {
             print!(" {}", v);
         }
@@ -410,11 +432,7 @@ fn generate_cdfs(
             trace.bitflags.0,
             trace
                 .bitflags
-                .flags()
-                .iter()
-                .map(MMStatsPftraceFlags::name)
-                .collect::<Vec<_>>()
-                .join(" ")
+                .name()
         );
     }
     */
@@ -445,20 +463,7 @@ fn generate_pdfs(
     keys.sort_by_key(|flags| categorized.get(flags).unwrap().len());
     for flags in keys.iter() {
         let hist = categorized.get(flags).unwrap();
-        let flags = {
-            let flags = flags
-                .flags()
-                .iter()
-                .map(MMStatsPftraceFlags::name)
-                .collect::<Vec<_>>()
-                .join(",");
-            if flags.is_empty() {
-                "none".into()
-            } else {
-                flags
-            }
-        };
-        print!(" {}({})", flags, hist.len());
+        print!(" {}({})", flags.name(), hist.len());
 
         const PDF_STEP_SIZE: u64 = 2;
         let start = if let Some((_, threshold)) = rejected {
@@ -487,11 +492,7 @@ fn generate_pdfs(
             trace.bitflags.0,
             trace
                 .bitflags
-                .flags()
-                .iter()
-                .map(MMStatsPftraceFlags::name)
-                .collect::<Vec<_>>()
-                .join(" ")
+                .name()
         );
     }
     */
