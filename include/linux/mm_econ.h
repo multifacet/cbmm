@@ -1,6 +1,7 @@
 #ifndef _MM_ECON_H_
 #define _MM_ECON_H_
 
+#include <linux/fs.h>
 #include <linux/types.h>
 
 // Various possible actions, to be used with `struct mm_action`.
@@ -16,6 +17,8 @@
 // The length of one Long Time Unit (LTU), the fundamental time accounting unit
 // of mm_econ. This value is in milliseconds (1 LTU = MM_ECON_LTU ms).
 #define MM_ECON_LTU 10000
+
+extern const struct file_operations proc_mmap_filters_operations;
 
 // An action that may be taken by the memory management subsystem.
 struct mm_action {
