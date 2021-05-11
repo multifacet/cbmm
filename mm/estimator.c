@@ -13,6 +13,8 @@
 
 #define HUGE_PAGE_ORDER 9
 
+#define MMAP_FILTER_BUF_SIZE 1024
+
 ///////////////////////////////////////////////////////////////////////////////
 // Globals...
 
@@ -20,13 +22,6 @@
 // - 0: off (just use default linux behavior)
 // - 1: on (cost-benefit estimation)
 static int mm_econ_mode = 0;
-
-static int mm_econ_mmap_filters = 0;
-
-// The comm of the process to track
-static char process_comm[TASK_COMM_LEN];
-// The pid of the process to track. Only used with mmap_filters
-static pid_t process_pid = 0;
 
 // The Preloaded Profile, if any.
 struct profile_range {
@@ -75,11 +70,16 @@ struct mmap_filter {
     struct list_head comparisons;
 };
 
-// Invariant: none of the ranges overlap!
-static struct rb_root preloaded_profile = RB_ROOT;
+// A process using mmap filters
+struct mmap_filter_proc {
+    struct list_head node;
+    pid_t pid;
+    struct list_head filters;
+    struct rb_root ranges_root;
+};
 
-// List of mmap filters
-static LIST_HEAD(mmap_filters);
+// List of processes using mmap filters
+static LIST_HEAD(filter_procs);
 
 // The TLB misses estimator, if any.
 static mm_econ_tlb_miss_estimator_fn_t tlb_miss_est_fn = NULL;
@@ -94,6 +94,8 @@ static u64 mm_econ_num_decisions = 0;
 static u64 mm_econ_num_decisions_yes = 0;
 // Number of huge page promotions in #PFs.
 static u64 mm_econ_num_hp_promotions = 0;
+
+extern inline struct task_struct *extern_get_proc_task(const struct inode *inode);
 
 ///////////////////////////////////////////////////////////////////////////////
 // Actual implementation
@@ -118,9 +120,9 @@ EXPORT_SYMBOL(register_mm_econ_tlb_miss_estimator);
  * it. Otherwise, return NULL.
  */
 static struct profile_range *
-profile_search(u64 addr)
+profile_search(struct rb_root *ranges_root, u64 addr)
 {
-    struct rb_node *node = preloaded_profile.rb_node;
+    struct rb_node *node = ranges_root->rb_node;
 
     while (node) {
         struct profile_range *range =
@@ -148,9 +150,10 @@ ranges_overlap(struct profile_range *r1, struct profile_range *r2)
 /*
  * Remove all ranges overlapping with the new range
  */
-static void remove_overlapping_ranges(struct profile_range *new_range)
+static void remove_overlapping_ranges(struct rb_root *ranges_root,
+    struct profile_range *new_range)
 {
-    struct rb_node *node = preloaded_profile.rb_node;
+    struct rb_node *node = ranges_root->rb_node;
     struct rb_node *first_overlapping = NULL;
     struct rb_node *next;
     struct profile_range *cur_range;
@@ -183,7 +186,7 @@ static void remove_overlapping_ranges(struct profile_range *new_range)
     next = rb_next(node);
     cur_range = container_of(node, struct profile_range, node);
     while (ranges_overlap(new_range, cur_range)) {
-        rb_erase(node, &preloaded_profile);
+        rb_erase(node, ranges_root);
         vfree(cur_range);
 
         if (!next)
@@ -201,11 +204,11 @@ static void remove_overlapping_ranges(struct profile_range *new_range)
  * existing ones as must have been unmapped.
  */
 static void
-profile_range_insert(struct profile_range *new_range)
+profile_range_insert(struct rb_root *ranges_root, struct profile_range *new_range)
 {
-    struct rb_node **new = &(preloaded_profile.rb_node), *parent = NULL;
+    struct rb_node **new = &(ranges_root->rb_node), *parent = NULL;
 
-    remove_overlapping_ranges(new_range);
+    remove_overlapping_ranges(ranges_root, new_range);
 
     while (*new) {
         struct profile_range *this =
@@ -221,57 +224,57 @@ profile_range_insert(struct profile_range *new_range)
     }
 
     rb_link_node(&new_range->node, parent, new);
-    rb_insert_color(&new_range->node, &preloaded_profile);
+    rb_insert_color(&new_range->node, ranges_root);
 }
 
 static void
-profile_free_all(void)
+profile_free_all(struct rb_root *ranges_root)
 {
-    struct rb_node *node = preloaded_profile.rb_node;
+    struct rb_node *node = ranges_root->rb_node;
 
     while(node) {
         struct profile_range *range =
             container_of(node, struct profile_range, node);
 
-        rb_erase(node, &preloaded_profile);
-        node = preloaded_profile.rb_node;
+        rb_erase(node, ranges_root);
+        node = ranges_root->rb_node;
 
         vfree(range);
     }
 }
 
-static void
-print_profile(void)
-{
-    struct rb_node *node = rb_first(&preloaded_profile);
+//static void
+//print_profile(struct rb_root *ranges_root)
+//{
+//    struct rb_node *node = rb_first(ranges_root);
+//
+//    // We may not be able to write everything to the buffer. So we print
+//    // everything to printk instead.
+//
+//    pr_warn("mm_econ: profile...");
+//
+//    while (node) {
+//        struct profile_range *range =
+//            container_of(node, struct profile_range, node);
+//        pr_warn("mm_econ: [%llu, %llu) (%llu bytes) misses=%llu\n",
+//                range->start, range->end,
+//                (range->end - range->start),
+//                range->misses);
+//
+//        node = rb_next(node);
+//    }
+//
+//    pr_warn("mm_econ: END profile...");
+//}
 
-    // We may not be able to write everything to the buffer. So we print
-    // everything to printk instead.
-
-    pr_warn("mm_econ: profile...");
-
-    while (node) {
-        struct profile_range *range =
-            container_of(node, struct profile_range, node);
-        pr_warn("mm_econ: [%llu, %llu) (%llu bytes) misses=%llu\n",
-                range->start, range->end,
-                (range->end - range->start),
-                range->misses);
-
-        node = rb_next(node);
-    }
-
-    pr_warn("mm_econ: END profile...");
-}
-
-static void mmap_filters_free_all(void)
+static void mmap_filters_free_all(struct mmap_filter_proc *proc)
 {
     struct mmap_filter *filter;
     struct mmap_comparison *comparison;
     struct list_head *pos, *n;
     struct list_head *cPos, *cN;
 
-    list_for_each_safe(pos, n, &mmap_filters) {
+    list_for_each_safe(pos, n, &proc->filters) {
         filter = list_entry(pos, struct mmap_filter, node);
 
         // Free each comparison in this filter
@@ -336,7 +339,15 @@ compute_hpage_benefit_from_profile(
         const struct mm_action *action)
 {
     u64 ret = 0;
-    struct profile_range *range = profile_search(action->address);
+    struct mmap_filter_proc *proc;
+    struct profile_range *range = NULL;
+
+    list_for_each_entry(proc, &filter_procs, node) {
+        if (proc->pid == current->tgid) {
+            range = profile_search(&proc->ranges_root, action->address);
+            break;
+        }
+    }
 
     if (range) {
         ret = range->misses;
@@ -557,11 +568,6 @@ EXPORT_SYMBOL(mm_estimate_changes);
 // action associated with `cost` should be TAKEN, and false otherwise.
 bool mm_decide(const struct mm_cost_delta *cost)
 {
-    // Only track a new process if we aren't currently tracking one
-    if (mm_econ_mmap_filters && process_pid != current->tgid) {
-        return false;
-    }
-
     mm_econ_num_decisions += 1;
 
     if (mm_econ_mode == 0) {
@@ -620,24 +626,28 @@ static bool mm_does_quantity_match(struct mmap_comparison *c, u64 val)
 void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr, u64 section_off,
         u64 addr, u64 len, u64 prot, u64 flags, u64 fd, u64 off)
 {
+    struct mmap_filter_proc *proc;
     struct mmap_filter *filter;
     struct mmap_comparison *comp;
     struct profile_range *range = NULL;
+    struct list_head *filter_head = NULL;
     bool passes_filter;
     u64 val;
     // Have misses default to zero if no filters match
     u64 misses = 0;
 
-    if (!mm_econ_mmap_filters)
-        return;
-
     // If this isn't the process we care about, move on
-    if (process_pid != pid) {
-        return;
+    list_for_each_entry(proc, &filter_procs, node) {
+        if (proc->pid == pid) {
+            filter_head = &proc->filters;
+            break;
+        }
     }
+    if (!filter_head)
+        return;
 
     // Check if this mmap matches any of our filters
-    list_for_each_entry(filter, &mmap_filters, node) {
+    list_for_each_entry(filter, filter_head, node) {
         passes_filter = section == filter->section;
 
         list_for_each_entry(comp, &filter->comparisons, node) {
@@ -677,30 +687,24 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
     range->end = (mapaddr + len + PAGE_SIZE - 1) & PAGE_MASK;
     range->misses = misses;
 
-    profile_range_insert(range);
+    profile_range_insert(&proc->ranges_root, range);
     //printk("Added range %d %llx %llx %lld %llx\n", section, range->start, range->end, range->misses, len);
-}
-
-void mm_profile_register_process(char *comm, pid_t pid)
-{
-    // Only track a new process if we aren't currently tracking one
-    if (process_pid != 0) {
-        return;
-    }
-
-    // If the comm matches what we're looking for, track this process
-    if (strcmp(process_comm, comm) == 0) {
-        process_pid = pid;
-    }
 }
 
 void mm_profile_check_exiting_proc(pid_t pid)
 {
-    if (process_pid == pid) {
-        process_pid = 0;
+    struct mmap_filter_proc *proc;
+    list_for_each_entry(proc, &filter_procs, node) {
+        if (proc->pid == pid) {
+            // If the process exits, we should also clear its profile
+            profile_free_all(&proc->ranges_root);
+            mmap_filters_free_all(proc);
 
-        // If the process exits, we should also clear its profile
-        profile_free_all();
+            // Remove the node from the list
+            list_del(&proc->node);
+            vfree(proc);
+            break;
+        }
     }
 }
 
@@ -759,138 +763,18 @@ static ssize_t stats_store(struct kobject *kobj,
 static struct kobj_attribute stats_attr =
 __ATTR(stats, 0444, stats_show, stats_store);
 
-static ssize_t preloaded_profile_show(struct kobject *kobj,
-        struct kobj_attribute *attr, char *buf)
-{
-    ssize_t count = sprintf(buf, "\n");
-    print_profile();
-    return count;
-}
+static struct attribute *mm_econ_attr[] = {
+    &enabled_attr.attr,
+    &stats_attr.attr,
+    NULL,
+};
 
-/*
- * Removes any existing profile and replaces it with the given one. The
- * expected format for the profile is:
- *      start end misses; start end misses; ...
- *
- * If there is an error, the current profile is still removed, and it is left
- * cleared.
- */
-static ssize_t preloaded_profile_store(struct kobject *kobj,
-        struct kobj_attribute *attr,
-        const char *buf, size_t count)
-{
-    char *tok = (char *)buf;
-    struct profile_range *range = NULL;
-    ssize_t error;
-    int ret;
-    u64 value;
-    char *value_buf;
+static const struct attribute_group mm_econ_attr_group = {
+    .attrs = mm_econ_attr,
+};
 
-    // First, free the existing profile.
-    profile_free_all();
-    mmap_filters_free_all();
-
-    // Try to read in all of the ranges
-    while (tok) {
-        range = vmalloc(sizeof(struct profile_range));
-        if (!range) {
-            error = -ENOMEM;
-            goto err;
-        }
-
-        // Get the beginning of the range.
-        value_buf = strsep(&tok, " ");
-        if (!value_buf) {
-            error = -EINVAL;
-            goto err;
-        }
-
-        ret = kstrtoull(value_buf, 0, &value);
-        if (ret != 0) {
-            error = -EINVAL;
-            goto err;
-        }
-
-        range->start = value;
-
-        // Get the end of the range.
-        value_buf = strsep(&tok, " ");
-        if (!value_buf) {
-            error = -EINVAL;
-            goto err;
-        }
-
-        ret = kstrtoull(value_buf, 0, &value);
-        if (ret != 0) {
-            error = -EINVAL;
-            goto err;
-        }
-
-        range->end = value;
-
-        // Get the TLB miss count.
-        value_buf = strsep(&tok, ";");
-        if (!value_buf) {
-            error = -EINVAL;
-            goto err;
-        }
-
-        ret = kstrtoull(value_buf, 0, &value);
-        if (ret != 0) {
-            error = -EINVAL;
-            goto err;
-        }
-
-        range->misses = value;
-
-        profile_range_insert(range);
-    }
-
-    pr_warn("mm_econ: profile set.");
-    print_profile();
-
-    return count;
-
-err:
-    if (range)
-        vfree(range);
-    profile_free_all();
-    return error;
-}
-static struct kobj_attribute preloaded_profile_attr =
-__ATTR(preloaded_profile, 0644, preloaded_profile_show, preloaded_profile_store);
-
-static ssize_t mmap_filters_enabled_show(struct kobject *kobj,
-        struct kobj_attribute *attr, char *buf)
-{
-    return sprintf(buf, "%d\n", mm_econ_mmap_filters);
-}
-
-static ssize_t mmap_filters_enabled_store(struct kobject *kobj,
-        struct kobj_attribute *attr,
-        const char *buf, size_t count)
-{
-    int en;
-    int ret;
-
-    ret = kstrtoint(buf, 0, &en);
-
-    if (ret != 0) {
-        mm_econ_mmap_filters = 0;
-        return ret;
-    }
-    else if (en >= 0 && en <= 1) {
-        mm_econ_mmap_filters = en;
-        return count;
-    }
-    else {
-        mm_econ_mmap_filters = 0;
-        return -EINVAL;
-    }
-}
-static struct kobj_attribute mmap_filters_enabled_attr =
-__ATTR(mmap_filters_enabled, 0644, mmap_filters_enabled_show,
-    mmap_filters_enabled_store);
+///////////////////////////////////////////////////////////////////////////////
+// procfs files
 
 static void mm_memory_section_get_str(char *buf, enum mm_memory_section section)
 {
@@ -946,18 +830,37 @@ static void mmap_quantity_get_str(char *buf, enum mmap_quantity quant)
     }
 }
 
-static ssize_t mmap_filters_show(struct kobject *kobj,
-        struct kobj_attribute *attr, char *buf)
+static ssize_t mmap_filters_read(struct file *file,
+        char __user *buf, size_t count, loff_t *ppos)
 {
-    ssize_t count = 0;
+    struct task_struct *task = extern_get_proc_task(file_inode(file));
+    char *buffer;
+    ssize_t len = 0;
+    ssize_t ret = 0;
     struct mmap_filter *filter;
     struct mmap_comparison *comparison;
+    struct mmap_filter_proc *proc;
+    struct list_head *filter_head = NULL;
+
+    buffer = vmalloc(sizeof(char) * MMAP_FILTER_BUF_SIZE);
+    if (!buffer)
+        return -ENOMEM;
 
     // First, print the CSV Header for easier reading
-    count = sprintf(buf, "SECTION,MISSES,CONSTRAINTS...\n");
+    len = sprintf(buffer, "SECTION,MISSES,CONSTRAINTS...\n");
+
+    // Find the filters that correspond to this process if there are any
+    list_for_each_entry(proc, &filter_procs, node) {
+        if (proc->pid == task->tgid) {
+            filter_head = &proc->filters;
+            break;
+        }
+    }
+    if (!filter_head)
+        goto out;
 
     // Print out all of the filters
-    list_for_each_entry(filter, &mmap_filters, node) {
+    list_for_each_entry(filter, filter_head, node) {
         char section[8];
         char quantity[16];
         u64 misses = filter->misses;
@@ -967,7 +870,7 @@ static ssize_t mmap_filters_show(struct kobject *kobj,
         mm_memory_section_get_str(section, filter->section);
 
         // Print the per filter information
-        count += sprintf(&buf[count], "%s,0x%llx", section, misses);
+        len += sprintf(&buffer[len], "%s,0x%llx", section, misses);
 
         list_for_each_entry(comparison, &filter->comparisons, node) {
             mmap_quantity_get_str(quantity, comparison->quant);
@@ -975,15 +878,21 @@ static ssize_t mmap_filters_show(struct kobject *kobj,
             val = comparison->val;
 
             // Print the per comparison information
-            count += sprintf(&buf[count], ",%s,%c,0x%llx", quantity,
+            len += sprintf(&buffer[len], ",%s,%c,0x%llx", quantity,
                 comparator, val);
         }
 
         // Remember to end with a newline
-        count += sprintf(&buf[count], "\n");
+        len += sprintf(&buffer[len], "\n");
     }
 
-    return count;
+out:
+    ret = simple_read_from_buffer(buf, count, ppos, buffer, len);
+
+    // Remember to free the buffer
+    vfree(buffer);
+
+    return ret;
 }
 
 static int get_memory_section(char *buf, enum mm_memory_section *section)
@@ -1095,22 +1004,46 @@ static int mmap_filter_read_comparison(char **tok, struct mmap_comparison *c)
     return 0;
 }
 
-static ssize_t mmap_filters_store(struct kobject *kobj,
-        struct kobj_attribute *attr,
-        const char *buf, size_t count)
+static ssize_t mmap_filters_write(struct file *file,
+        const char __user *buf, size_t count,
+        loff_t *ppos)
 {
+    struct task_struct *task = extern_get_proc_task(file_inode(file));
     char *outerTok = (char *)buf;
     char *tok = NULL;
     struct mmap_filter *filter = NULL;
     struct mmap_comparison *comparison = NULL;
+    struct mmap_filter_proc *proc;
+    bool alloc_new_proc = true;
     ssize_t error = 0;
     int ret;
     u64 value;
     char * value_buf;
 
-    // Free the existing profiles
-    profile_free_all();
-    mmap_filters_free_all();
+    // See if a an entry already exists for this process
+    list_for_each_entry(proc, &filter_procs, node) {
+        if (proc->pid == task->tgid) {
+            alloc_new_proc = false;
+            // Free the existing profile
+            profile_free_all(&proc->ranges_root);
+            mmap_filters_free_all(proc);
+            break;
+        }
+    }
+
+    // Allocate the proc structure if necessary
+    if (alloc_new_proc) {
+        proc = vmalloc(sizeof(struct mmap_filter_proc));
+        if (!proc) {
+            error = -ENOMEM;
+            goto err;
+        }
+
+        // Initialize the new proc
+        proc->pid = task->tgid;
+        INIT_LIST_HEAD(&proc->filters);
+        proc->ranges_root = RB_ROOT;
+    }
 
     // Read in the filters
     tok = strsep(&outerTok, "\n");
@@ -1169,14 +1102,19 @@ static ssize_t mmap_filters_store(struct kobject *kobj,
             }
 
             // Add the comparison to the list of comparisons
-            list_add(&comparison->node, &filter->comparisons);
+            list_add_tail(&comparison->node, &filter->comparisons);
         }
 
         // Add the new filter to the list
-        list_add(&filter->node, &mmap_filters);
+        list_add_tail(&filter->node, &proc->filters);
 
         // Get the next filter
         tok = strsep(&outerTok, "\n");
+    }
+
+    // Link the new proc if we need to
+    if (alloc_new_proc) {
+        list_add_tail(&proc->node, &filter_procs);
     }
 
     return count;
@@ -1184,45 +1122,18 @@ static ssize_t mmap_filters_store(struct kobject *kobj,
 err:
     if (filter)
         vfree (filter);
-    mmap_filters_free_all();
+    if (proc) {
+        mmap_filters_free_all(proc);
+        if (alloc_new_proc)
+            vfree(proc);
+    }
     return error;
 }
-static struct kobj_attribute mmap_filters_attr =
-__ATTR(mmap_filters, 0644, mmap_filters_show, mmap_filters_store);
 
-static ssize_t process_comm_show(struct kobject *kobj,
-        struct kobj_attribute *attr, char *buf)
-{
-    return sprintf(buf, "%s\n", process_comm);
-}
-
-static ssize_t process_comm_store(struct kobject *kobj,
-        struct kobj_attribute *attr,
-        const char *buf, size_t count)
-{
-    strncpy(process_comm, buf, TASK_COMM_LEN);
-
-    if (count < TASK_COMM_LEN) {
-        return count;
-    } else {
-        return TASK_COMM_LEN;
-    }
-}
-static struct kobj_attribute process_comm_attr =
-__ATTR(process_comm, 0644, process_comm_show, process_comm_store);
-
-static struct attribute *mm_econ_attr[] = {
-    &enabled_attr.attr,
-    &preloaded_profile_attr.attr,
-    &stats_attr.attr,
-    &mmap_filters_enabled_attr.attr,
-    &mmap_filters_attr.attr,
-    &process_comm_attr.attr,
-    NULL,
-};
-
-static const struct attribute_group mm_econ_attr_group = {
-    .attrs = mm_econ_attr,
+const struct file_operations proc_mmap_filters_operations = {
+    .read = mmap_filters_read,
+    .write = mmap_filters_write,
+    .llseek = default_llseek,
 };
 
 ///////////////////////////////////////////////////////////////////////////////

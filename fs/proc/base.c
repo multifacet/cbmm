@@ -70,6 +70,7 @@
 #include <linux/kallsyms.h>
 #include <linux/stacktrace.h>
 #include <linux/resource.h>
+#include <linux/mm_econ.h>
 #include <linux/module.h>
 #include <linux/mount.h>
 #include <linux/security.h>
@@ -148,6 +149,11 @@ struct pid_entry {
 		NULL, &proc_pid_attr_operations,	\
 		{ .lsm = LSM })
 
+// This is a hack to get get_proc_taskin mm/estimator.c
+inline struct task_struct *extern_get_proc_task(const struct inode *inode)
+{
+    return get_proc_task(inode);
+}
 /*
  * Count the number of hardlinks for the pid_entry table, excluding the .
  * and .. links.
@@ -3097,6 +3103,9 @@ static const struct pid_entry tgid_base_stuff[] = {
 #ifdef CONFIG_PROC_PID_ARCH_STATUS
 	ONE("arch_status", S_IRUGO, proc_pid_arch_status),
 #endif
+#ifdef CONFIG_MM_ECON
+    REG("mmap_filters", S_IRUGO|S_IWUSR, proc_mmap_filters_operations),
+#endif
 };
 
 static int proc_tgid_base_readdir(struct file *file, struct dir_context *ctx)
@@ -3486,6 +3495,9 @@ static const struct pid_entry tid_base_stuff[] = {
 #endif
 #ifdef CONFIG_PROC_PID_ARCH_STATUS
 	ONE("arch_status", S_IRUGO, proc_pid_arch_status),
+#endif
+#ifdef CONFIG_MM_ECON
+    REG("mmap_filters", S_IRUGO|S_IWUSR, proc_mmap_filters_operations),
 #endif
 };
 
