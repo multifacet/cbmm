@@ -2857,7 +2857,7 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		 * Make the page table entry as reserved for TLB miss tracking
 		 * if the PMD was marked as reserved.
 		 */
-		if(is_old_reserved) {
+		if(is_old_reserved && mm->badger_trap_enabled) {
 			// TODO markm currently only handle anon memory
 			if (vma_is_anonymous(vma)) {
 				entry = pte_mkreserve(entry);
