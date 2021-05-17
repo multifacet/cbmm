@@ -69,6 +69,8 @@
 #include <linux/nmi.h>
 #include <linux/psi.h>
 #include <linux/mm_stats.h>
+#include <linux/cpufreq.h>
+#include <linux/mm_econ.h>
 
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
@@ -348,6 +350,58 @@ int watermark_scale_factor = 10;
 static unsigned long nr_kernel_pages __initdata;
 static unsigned long nr_all_pages __initdata;
 static unsigned long dma_reserve __initdata;
+
+#define LFPA_N 5
+static u64 last_few_prezeroed_allocs[LFPA_N] = { 0, 0, 0, 0, 0 };
+static atomic_t lfpa_head = ATOMIC_INIT(0);
+
+// Update the lfpa array by adding the given timestamp counter value at the
+// end atomically and incrementing the head index.
+static inline void lfpa_update(u64 ts) {
+	while (true) {
+		int i = atomic_read(&lfpa_head);
+		int inew = (i == (LFPA_N - 1)) ? 0 : (i + 1);
+
+		int old = atomic_cmpxchg(&lfpa_head, i, inew);
+		if (old == i) {
+			last_few_prezeroed_allocs[inew] = rdtsc();
+			return;
+		}
+	}
+}
+
+// Use the LFPA array to compute an estimate of number of prezeroed pages
+// allocated per LTU.
+u64 mm_estimated_prezeroed_used(void)
+{
+	u64 max = 0, min = 0, x, diff;
+	int i;
+	u64 freq;
+
+	// Non-atomically read all, and compute the difference between max and
+	// min, being careful of unused entries.
+	u64 last_few_prezeroed_allocs_copy[LFPA_N];
+	memcpy(last_few_prezeroed_allocs_copy,
+			last_few_prezeroed_allocs,
+			LFPA_N * sizeof(u64));
+
+	for (i = 0; i < LFPA_N; ++i) {
+		x = last_few_prezeroed_allocs_copy[i];
+		if (x != 0) {
+			if (x > max) max = x;
+			if (x < min || min == 0) min = x;
+		}
+	}
+
+	if (min == 0) return 0;
+
+	// This is the time to allocate (LFPA_N - 1) pages.
+	diff = max - min;
+	freq = (u64) cpufreq_get(smp_processor_id()); // khz
+
+	// We can now compute allocs per LTU.
+	return (LFPA_N - 1) * freq * MM_ECON_LTU / diff;
+}
 
 #ifdef CONFIG_HAVE_MEMBLOCK_NODE_MAP
 static unsigned long arch_zone_lowest_possible_pfn[MAX_NR_ZONES] __initdata;
@@ -4819,6 +4873,11 @@ out:
 	    unlikely(__memcg_kmem_charge(page, gfp_mask, order) != 0)) {
 		__free_pages(page, order);
 		page = NULL;
+	}
+
+	// markm: update if we allocated a prezeroed page.
+	if (page && (gfp_mask & __GFP_ZERO)) {
+		lfpa_update(rdtsc());
 	}
 
 	trace_mm_page_alloc(page, order, alloc_mask, ac.migratetype);
