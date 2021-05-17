@@ -18,6 +18,9 @@
 static struct task_struct *asynczero_task = NULL;
 static volatile bool asynczero_should_stop = false;
 
+// Keep track of where we left off...
+static struct zone *current_zone = NULL;
+
 int sleep = 1000;
 module_param(sleep, int, 0644);
 
@@ -93,13 +96,13 @@ static inline void zero_fill_compound_page(struct page *page, int order)
 	pages_zeroed += 1 << order;
 }
 
-static void zero_fill_zone_pages(struct zone *zone)
+static int zero_fill_zone_pages(struct zone *zone, int *n)
 {
 	struct page *page;
 	struct free_area *area;
 	unsigned long flags;
 	int order;
-	u64 old_nzeroed = pages_zeroed;
+	bool zeroed_something = false;
 
         for (order = HUGE_PAGE_ORDER; order < MAX_ORDER; ++order) {
 		unsigned long retries = 0;
@@ -127,6 +130,7 @@ static void zero_fill_zone_pages(struct zone *zone)
 
 			// zero fill
 			zero_fill_compound_page(page, order);
+			zeroed_something = true;
 
 			// add back to freelist
 			spin_lock_irqsave(&zone->lock, flags);
@@ -134,26 +138,88 @@ static void zero_fill_zone_pages(struct zone *zone)
 			area->nr_free++;
 			spin_unlock_irqrestore(&zone->lock, flags);
 
-			if (pages_zeroed - old_nzeroed > count) {
-				msleep(sleep);
-				old_nzeroed = pages_zeroed;
+			// One down... (n-1) to go...
+			*n -= 1 << order;
+			if (*n <= 0) {
+				if (mm_econ_is_on())
+					return 0;
+				else
+					msleep(sleep);
 			}
 		}
+	}
+
+	// If we get here, we completed both loops without zeroing n pages.
+	// This could be because the zone doesn't have n pages or because all
+	// of the freelists we tried are already zeroed. If they are already
+	// zeroed, we want to return a distinct exit code so that we don't
+	// waste time continue to zero.
+	if (zeroed_something)
+		return -1; // ran out of pages to zero
+	else
+		return -2; // everything was already zeroed
+}
+
+static void zero_n_pages(int n) {
+	int ret;
+	bool all_zeroed = false;
+
+	while (true) {
+		// If this is true when we start going through zones from the
+		// beginning again, then it is likely all zones are zeroed (it
+		// could be just the last zone, though... best effort).
+		if (all_zeroed) return;
+
+		for_each_zone(current_zone) {
+			if (!populated_zone(current_zone) || skip_zone(current_zone))
+				continue;
+
+			ret = zero_fill_zone_pages(current_zone, &n);
+
+			switch (ret) {
+				case -2:
+					all_zeroed = true;
+					break;
+				case -1:
+				case 0:
+					all_zeroed = false;
+					break;
+
+				default:
+					BUG();
+			}
+
+			// If we have zeroed enough, exit for now.
+			if (n <= 0) return;
+		}
+
+		// just being carefull... shouldn't make a difference.
+		current_zone = NULL;
 	}
 }
 
 static int asynczero_do_work(void *data)
 {
-	struct zone *zone;
-
 	while (!asynczero_should_stop) {
-		for_each_zone(zone) {
-			if (!populated_zone(zone) || skip_zone(zone))
-				continue;
+		// We just woke up. Check the cost-benefit of doing another iteration.
+		struct mm_cost_delta mm_cost_delta;
+		struct mm_action mm_action = {
+			.action = MM_ACTION_RUN_PREZEROING,
+			.prezero_n = count,
+		};
+		bool should_run;
 
-			zero_fill_zone_pages(zone);
+		mm_estimate_changes(&mm_action, &mm_cost_delta);
+		should_run = mm_decide(&mm_cost_delta);
+
+		// If worth it, zero some pages.
+		if (should_run) zero_n_pages(count);
+
+		// Yield CPU.
+		if (mm_econ_is_on())
+			cond_resched();
+		else
 			msleep(sleep);
-		}
 	}
 
 	return 0;
@@ -187,3 +253,4 @@ void cleanup_module(void)
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Ashish Panwar");
+MODULE_AUTHOR("Mark Mansi");
