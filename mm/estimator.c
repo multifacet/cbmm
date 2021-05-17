@@ -427,6 +427,12 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
             mm_estimate_huge_page_reclaim_cost(action, cost);
             break;
 
+        case MM_ACTION_EAGER_PAGING:
+            // TODO(markm)
+            cost->cost = 0;
+            cost->benefit = 0;
+            break;
+
         default:
             printk(KERN_WARNING "Unknown mm_action %d\n", action->action);
             break;

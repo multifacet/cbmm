@@ -9,6 +9,7 @@
 #define MM_ACTION_DEMOTE_HUGE   (1 <<  1)
 #define MM_ACTION_RUN_DEFRAG    (1 <<  2)
 #define MM_ACTION_ALLOC_RECLAIM (1 <<  3)
+#define MM_ACTION_EAGER_PAGING  (1 <<  4)
 
 // The length of one Long Time Unit (LTU), the fundamental time accounting unit
 // of mm_econ. This value is in milliseconds (1 LTU = MM_ECON_LTU ms).

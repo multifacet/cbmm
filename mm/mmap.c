@@ -1379,6 +1379,20 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 
 	//down_read(&mm->badger_trap_page_table_sem);
 
+	// markm: use eager paging if the cost benefit analysis supports it.
+	struct mm_cost_delta mm_cost_delta;
+	struct mm_action mm_action;
+	bool should_do;
+
+	mm_action.address = addr;
+	mm_action.action = MM_ACTION_EAGER_PAGING;
+	mm_estimate_changes(&mm_action, &mm_cost_delta);
+	should_do = mm_decide(&mm_cost_delta);
+
+	if (should_do) {
+		flags |= MAP_POPULATE;
+	}
+
 	*populate = 0;
 
 	if (!len) {
