@@ -7,9 +7,11 @@
 #define MM_ACTION_NONE                 0
 #define MM_ACTION_PROMOTE_HUGE  (1 <<  0)
 #define MM_ACTION_DEMOTE_HUGE   (1 <<  1)
-#define MM_ACTION_RUN_DEFRAG    (1 <<  2)
+#define MM_ACTION_RUN_DEFRAG    (1 <<  2) // kcompactd
 #define MM_ACTION_ALLOC_RECLAIM (1 <<  3)
 #define MM_ACTION_EAGER_PAGING  (1 <<  4)
+#define MM_ACTION_RUN_PREZEROING (1 <<  5) // asynczero
+#define MM_ACTION_RUN_PROMOTION (1 <<  6) // khugepaged
 
 // The length of one Long Time Unit (LTU), the fundamental time accounting unit
 // of mm_econ. This value is in milliseconds (1 LTU = MM_ECON_LTU ms).
@@ -29,8 +31,8 @@ struct mm_action {
         // How large is the huge page we are creating? This is the order (e.g. 2MB would be 9)
         u64 huge_page_order;
 
-        // How long the defragmenter runs.
-        u64 how_long;
+        // How many pages are prezeroed?
+        u64 prezero_n;
     };
 };
 
@@ -82,4 +84,6 @@ mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr, u64 
 
 void mm_profile_register_process(char *comm, pid_t pid);
 void mm_profile_check_exiting_proc(pid_t pid);
+
+u64 mm_estimated_prezeroed_used(void);
 #endif

@@ -6,6 +6,7 @@
 #include <linux/highmem.h>
 #include <linux/kthread.h>
 #include <linux/sched/task.h>
+#include <linux/mm_econ.h>
 #include <asm/page_64.h>
 
 #define HUGE_PAGE_ORDER 9

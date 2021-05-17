@@ -2152,7 +2152,7 @@ static int khugepaged_wait_event(void)
 {
     struct mm_cost_delta mm_cost_delta;
     struct mm_action mm_action = {
-        .action = MM_ACTION_RUN_DEFRAG,
+        .action = MM_ACTION_RUN_PROMOTION,
         .unused = 0,
     };
     bool should_run;

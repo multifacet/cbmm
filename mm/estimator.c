@@ -9,6 +9,7 @@
 #include <linux/init.h>
 #include <linux/hashtable.h>
 #include <linux/mm_stats.h>
+#include <linux/sched/loadavg.h>
 
 #define HUGE_PAGE_ORDER 9
 
@@ -385,10 +386,69 @@ mm_estimate_huge_page_reclaim_cost(
     cost->cost += reclaim_cost;
 }
 
+// Estimate the cost of running a daemon. In general, this is just the time
+// that the daemon runs unless the system is idle -- idle time is considered
+// free to consume.
+void
+mm_estimate_daemon_cost(
+       const struct mm_action *action, struct mm_cost_delta *cost)
+{
+    // FIXME(markm): for now we just use the average system load on all cores
+    // because this is easy and cheap. However, we can get something more
+    // precise by looking at the number of currently running tasks on only
+    // local cores or something like that...
+    //
+    // nrunning = 0;
+    // for_each_cpu_and(cpu, cpumask_of_node(node), cpu_online_mask)
+    //   nrunning += cpu_rq(cpu)->nr_running;
+    //
+    // if (nrunning < ncpus_local)
+    //   cost = 0;
+    // else
+    //   cost = time_to_run;
+
+    __kernel_ulong_t loads[3]; /* 1, 5, and 15 minute load averages */
+    int ncpus = num_online_cpus();
+
+    get_avenrun(loads, 0, SI_LOAD_SHIFT - FSHIFT);
+
+    // If we have more cpus than load, running a background daemon is free.
+    if (ncpus > LOAD_INT(loads[0])) {
+        cost->cost = 0;
+    } else {
+        // TODO(markm): this should be however long the daemon runs for, which
+        // means we need to cap the run time.
+        cost->cost = 1ul << 32;
+    }
+}
+
+// Estimate the benefit of prezeroing memory based on the rate of usage of
+// zeroed pages so far.
+void mm_estimate_async_prezeroing_benefit(
+       const struct mm_action *action, struct mm_cost_delta *cost)
+{
+    // FIXME(markm): we assume that the cost to zero a 2MB region is about 10^6
+    // cycles. This is based on previous measurements we've made.
+    const u64 zeroing_per_page_cost = 1000000; // cycles
+
+    // The maximum amount of benefit is based on the number of pages we
+    // actually zero and actually use. That is, we don't benefit from zeroed
+    // pages that are not used, and we do not benefit from unzeroed pages.
+    //
+    // We will zero no more than `action->prezero_n` pages, and we will use (we
+    // estimate) no more than `recent_used` pages, so the benefit is capped at
+    // the minimum of these. The `recent_used` is the estimated number of pages
+    // used recently.
+    const u64 recent_used = mm_estimated_prezeroed_used();
+
+    cost->benefit = min(action->prezero_n, recent_used) * zeroing_per_page_cost;
+}
+
 bool mm_econ_is_on(void)
 {
     return mm_econ_mode > 0;
 }
+EXPORT_SYMBOL(mm_econ_is_on);
 
 // Estimates the change in the given metrics under the given action. Updates
 // the given cost struct in place.
@@ -415,9 +475,20 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
             break;
 
         case MM_ACTION_RUN_DEFRAG:
+            mm_estimate_daemon_cost(action, cost);
             // TODO(markm)
-            cost->cost = 0;
             cost->benefit = 0;
+            break;
+
+        case MM_ACTION_RUN_PROMOTION:
+            mm_estimate_daemon_cost(action, cost);
+            // TODO(markm)
+            cost->benefit = 0;
+            break;
+
+        case MM_ACTION_RUN_PREZEROING:
+            mm_estimate_daemon_cost(action, cost);
+            mm_estimate_async_prezeroing_benefit(action, cost);
             break;
 
         case MM_ACTION_ALLOC_RECLAIM: // Alloc reclaim for thp allocation.
@@ -443,6 +514,7 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
     mm_stats_hist_measure(&mm_econ_cost, cost->cost);
     mm_stats_hist_measure(&mm_econ_benefit, cost->benefit);
 }
+EXPORT_SYMBOL(mm_estimate_changes);
 
 // Decide whether to take an action with the given cost. Returns true if the
 // action associated with `cost` should be TAKEN, and false otherwise.
@@ -467,6 +539,7 @@ bool mm_decide(const struct mm_cost_delta *cost)
         return false;
     }
 }
+EXPORT_SYMBOL(mm_decide);
 
 // Inform the estimator of the promotion of the given huge page.
 void mm_register_promotion(u64 addr)
