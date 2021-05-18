@@ -407,18 +407,38 @@ mm_estimate_daemon_cost(
     // else
     //   cost = time_to_run;
 
+    const u64 huge_page_zeroing_cost = 100000;
+
     __kernel_ulong_t loads[3]; /* 1, 5, and 15 minute load averages */
     int ncpus = num_online_cpus();
 
     get_avenrun(loads, 0, SI_LOAD_SHIFT - FSHIFT);
 
     // If we have more cpus than load, running a background daemon is free.
+    // Otherwise, the cost is however many cycles the daemon runs, as this is
+    // time that is taken away from applications.
     if (ncpus > LOAD_INT(loads[0])) {
         cost->cost = 0;
     } else {
-        // TODO(markm): this should be however long the daemon runs for, which
-        // means we need to cap the run time.
-        cost->cost = 1ul << 32;
+        switch (action->action) {
+            case MM_ACTION_RUN_PREZEROING:
+                cost->cost = huge_page_zeroing_cost * action->prezero_n;
+                break;
+
+            case MM_ACTION_RUN_DEFRAG:
+            case MM_ACTION_RUN_PROMOTION:
+                // TODO(markm): this should be however long the daemon runs
+                // for, which means we need to cap the run time. There are also
+                // costs for copying pages and scanning.
+                //
+                // For now, we just make these really expensive.
+                cost->cost = 1ul << 32; // >1s
+                break;
+
+            default: // Not a daemon...
+                BUG();
+                return;
+        }
     }
 }
 
