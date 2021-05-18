@@ -18,9 +18,6 @@
 static struct task_struct *asynczero_task = NULL;
 static volatile bool asynczero_should_stop = false;
 
-// Keep track of where we left off...
-static struct zone *current_zone = NULL;
-
 int sleep = 1000;
 module_param(sleep, int, 0644);
 
@@ -160,7 +157,11 @@ static int zero_fill_zone_pages(struct zone *zone, int *n)
 		return -2; // everything was already zeroed
 }
 
-static void zero_n_pages(int n) {
+static void zero_n_pages(int n)
+{
+	// STATIC: Keep track of where we left off...
+	static struct zone *current_zone = NULL;
+
 	int ret;
 	bool all_zeroed = false;
 

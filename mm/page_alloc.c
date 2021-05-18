@@ -364,7 +364,7 @@ static inline void lfpa_update(u64 ts) {
 
 		int old = atomic_cmpxchg(&lfpa_head, i, inew);
 		if (old == i) {
-			last_few_prezeroed_allocs[inew] = rdtsc();
+			last_few_prezeroed_allocs[inew] = ts;
 			return;
 		}
 	}
@@ -4876,7 +4876,8 @@ out:
 	}
 
 	// markm: update if we allocated a prezeroed page.
-	if (page && (gfp_mask & __GFP_ZERO)) {
+	// For now, we mostly care about huge pages.
+	if (page && (gfp_mask & __GFP_ZERO) && (order >= 9)) {
 		lfpa_update(rdtsc());
 	}
 
