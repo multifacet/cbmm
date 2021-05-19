@@ -227,6 +227,28 @@ profile_range_insert(struct rb_root *ranges_root, struct profile_range *new_rang
     rb_insert_color(&new_range->node, ranges_root);
 }
 
+/*
+ * Move the ranges in one rb_tree to another
+ */
+static void
+profile_move(struct rb_root *src, struct rb_root *dst)
+{
+    struct profile_range *range;
+    struct rb_node *node = src->rb_node;
+
+    while (node) {
+        range = container_of(node, struct profile_range, node);
+
+        // Remove the entry from the source
+        rb_erase(node, src);
+
+        // Add the entry to the destination
+        profile_range_insert(dst, range);
+
+        node = src->rb_node;
+    }
+}
+
 static void
 profile_free_all(struct rb_root *ranges_root)
 {
@@ -631,10 +653,13 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
     struct mmap_comparison *comp;
     struct profile_range *range = NULL;
     struct list_head *filter_head = NULL;
+    // Used to keep track of the subranges of the new memory range that are
+    // from splitting a range due to a section_off constraint.
+    struct rb_root subranges = RB_ROOT;
+    struct rb_node *range_node = NULL;
     bool passes_filter;
+    u64 section_base = mapaddr - section_off;
     u64 val;
-    // Have misses default to zero if no filters match
-    u64 misses = 0;
 
     // If this isn't the process we care about, move on
     list_for_each_entry(proc, &filter_procs, node) {
@@ -646,14 +671,119 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
     if (!filter_head)
         return;
 
+    // Start with the original range of the new mapping
+    range = vmalloc(sizeof(struct profile_range));
+    if (!range) {
+        pr_warn("mm_add_mmap: no memory for new range");
+        return;
+    }
+    // Align the range bounds to a page
+    range->start = mapaddr & PAGE_MASK;
+    range->end = (mapaddr + len + PAGE_SIZE - 1) & PAGE_MASK;
+    range->misses = 0;
+    profile_range_insert(&subranges, range);
+
     // Check if this mmap matches any of our filters
     list_for_each_entry(filter, filter_head, node) {
+        // We need a second rb_tree because we don't want to change the
+        // subranges tree unless we are sure a filter matches
+        struct rb_root temp_subranges = RB_ROOT;
+        // The range in the subranges tree that we are splitting
+        struct profile_range *parent_range = NULL;
+        struct profile_range *split_range = NULL;
+
         passes_filter = section == filter->section;
 
         list_for_each_entry(comp, &filter->comparisons, node) {
             // Determine the value for to use for this comparison
-            if (comp->quant == QuantSectionOff)
-                val = section_off;
+            if (comp->quant == QuantSectionOff) {
+                // Because ranges can be split, we need to handle this more
+                // carefully.
+                // Find the range to do the comparison on
+                u64 search_key = comp->val + section_base;
+                if (comp->comp == CompGreaterThan) {
+                    search_key += PAGE_SIZE;
+                } if (comp->comp == CompLessThan) {
+                    search_key -= PAGE_SIZE;
+                }
+
+                if (!parent_range) {
+                    // Find the range to potentially split, and add it to
+                    // temp_subranges
+                    parent_range = profile_search(&subranges, search_key);
+                    if (!parent_range) {
+                        passes_filter = false;
+                        break;
+                    }
+
+                    range = vmalloc(sizeof(struct profile_range));
+                    if (!range) {
+                        pr_warn("mm_add_mmap: no memory for new range");
+                        profile_free_all(&subranges);
+                        profile_free_all(&temp_subranges);
+                        return;
+                    }
+                    range->start = parent_range->start;
+                    range->end = parent_range->end;
+                    range->misses = parent_range->misses;
+
+                    profile_range_insert(&temp_subranges, range); 
+                } else {
+                    // Find the range from the temp_subranges
+                    range = profile_search(&temp_subranges, search_key);
+                    if (!range) {
+                        passes_filter = false;
+                        break;
+                    }
+                }
+
+                // If the found range has already matched with a filter, we
+                // are done
+                if (range->misses != 0) {
+                    passes_filter = false;
+                    break;
+                }
+
+                // Assign the misses value.
+                range->misses = filter->misses;
+
+                // Split the range if necessary
+                split_range = vmalloc(sizeof(struct profile_range));
+                if (!split_range) {
+                    pr_warn("mm_add_mmap: no memory for new range");
+                    profile_free_all(&subranges);
+                    profile_free_all(&temp_subranges);
+                    return;
+                }
+
+                split_range->misses = 0;
+                if (comp->comp == CompGreaterThan) {
+                    if (range->start == search_key) {
+                        vfree(split_range);
+                        split_range = NULL;
+                        continue;
+                    }
+
+                    split_range->start = range->start;
+                    split_range->end = search_key;
+                    range->start = search_key;
+                } else if (comp->comp == CompLessThan) {
+                    if (range->end == search_key) {
+                        vfree(split_range);
+                        split_range = NULL;
+                        continue;
+                    }
+
+                    split_range->start = search_key;
+                    split_range->end = range->end;
+                    range->end = search_key;
+                }
+
+                // If we split the range, add it to the tree
+                profile_range_insert(&temp_subranges, split_range);
+
+                continue;
+            }
             else if (comp->quant == QuantAddr)
                 val = addr;
             else if (comp->quant == QuantLen)
@@ -670,24 +800,37 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
             passes_filter = passes_filter && mm_does_quantity_match(comp, val);
         }
 
-        if (passes_filter) {
-            misses = filter->misses;
+        // If we split a range for this filter, remove the old range
+        // from the subranges tree, and add the new ones
+        if (passes_filter && parent_range) {
+            range_node = &parent_range->node;
+            rb_erase(range_node, &subranges);
+
+            profile_move(&temp_subranges, &subranges);
+        }
+        // If the entire new range matches this filter, set the misses
+        // value for all of the subranges that have not been set yet
+        else if(passes_filter) {
+            range_node = rb_first(&subranges);
+
+            while (range_node) {
+                range = container_of(range_node, struct profile_range, node);
+
+                if (range->misses == 0)
+                    range->misses = filter->misses;
+
+                range_node = rb_next(range_node);
+            }
+
+            // Because the entire new range matched a filter, we no longer
+            // have to check the rest of the filters
             break;
         }
     }
 
-    // Add the memory range of the mmap to the tree of ranges
-    range = vmalloc(sizeof(struct profile_range));
-    if (!range) {
-        pr_warn("mm_add_mmap: no memory for new range");
-        return;
-    }
-    // Align the range bounds to a page
-    range->start = mapaddr & PAGE_MASK;
-    range->end = (mapaddr + len + PAGE_SIZE - 1) & PAGE_MASK;
-    range->misses = misses;
+    // Finally, insert all of the new ranges into the proc's tree
+    profile_move(&subranges, &proc->ranges_root);
 
-    profile_range_insert(&proc->ranges_root, range);
     //printk("Added range %d %llx %llx %lld %llx\n", section, range->start, range->end, range->misses, len);
 }
 
