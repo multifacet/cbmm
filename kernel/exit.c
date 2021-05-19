@@ -730,9 +730,11 @@ void __noreturn do_exit(long code)
 		print_badger_trap_stats(current->mm);
 	}
 
+#ifdef CONFIG_MM_ECON
 	// Bijan: When a process exits, check if we should stop tracking it for
 	// the memory profile
 	mm_profile_check_exiting_proc(tsk->tgid);
+#endif
 
 	/* markm: doesn't seem to work properly if main thread exits not-last.
 	if(current->mm && current->mm->badger_trap_enabled

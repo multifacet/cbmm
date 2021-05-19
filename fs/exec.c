@@ -1862,6 +1862,7 @@ static int __do_execve_file(int fd, struct filename *filename,
 		put_files_struct(displaced);
 
 	// Bijan: If exec succeded, check if this is the process we want to track
+#ifdef CONFIG_MM_ECON
 	new_mm = current->mm;
 	mm_add_memory_range(current->tgid, SectionCode, new_mm->start_code, 0, 0,
 	    new_mm->end_code - new_mm->start_code, 0, 0, 0, 0);
@@ -1869,6 +1870,7 @@ static int __do_execve_file(int fd, struct filename *filename,
 	    new_mm->end_data - new_mm->start_data, 0, 0, 0, 0);
 	mm_add_memory_range(current->tgid, SectionHeap, new_mm->start_brk, 0, 0,
 	    new_mm->brk - new_mm->start_brk, 0, 0, 0, 0);
+#endif
 	return retval;
 
 out:
