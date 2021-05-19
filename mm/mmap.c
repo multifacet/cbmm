@@ -1659,12 +1659,14 @@ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
 
 	retval = vm_mmap_pgoff(file, addr, len, prot, flags, pgoff);
+#ifdef CONFIG_MM_ECON
 	if (!IS_ERR((void*)retval)) {
 		// Bijan: Potentially add this mmap to the tracked process's profile
 		u64 section_off = retval - current->mm->mmap_base;
 		mm_add_memory_range(current->tgid, SectionMmap, retval, section_off,
 				addr, len, prot, flags, fd, pgoff);
 	}
+#endif
 out_fput:
 	if (file)
 		fput(file);
@@ -3109,11 +3111,14 @@ out:
 		mm->locked_vm += (len >> PAGE_SHIFT);
 	vma->vm_flags |= VM_SOFTDIRTY;
 
+#ifdef CONFIG_MM_ECON
 	// Bijan: If we expand the heap, add the new section to the tracked
 	// process's profile
 	section_off = addr - current->mm->start_brk;
 	mm_add_memory_range(current->tgid, SectionHeap, addr, section_off, 0, len,
 		0, 0, 0, 0);
+#endif
+
 	return 0;
 }
 
