@@ -1662,7 +1662,7 @@ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 #ifdef CONFIG_MM_ECON
 	if (!IS_ERR((void*)retval)) {
 		// Bijan: Potentially add this mmap to the tracked process's profile
-		u64 section_off = retval - current->mm->mmap_base;
+		u64 section_off = current->mm->mmap_base - retval;
 		mm_add_memory_range(current->tgid, SectionMmap, retval, section_off,
 				addr, len, prot, flags, fd, pgoff);
 	}

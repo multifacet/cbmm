@@ -140,6 +140,64 @@ profile_search(struct rb_root *ranges_root, u64 addr)
     return NULL;
 }
 
+/*
+ * Search the tree for the first range that satisfies the condition
+ */
+static struct profile_range *
+profile_find_first_range(struct rb_root *ranges_root, u64 addr,
+        enum mmap_comparator comp)
+{
+    struct profile_range *result = NULL;
+    struct profile_range *range = NULL;
+    struct rb_node *node = ranges_root->rb_node;
+
+    // First find any range that satisfies the condition
+    while (node) {
+        range = container_of(node, struct profile_range, node);
+
+        if (comp == CompLessThan) {
+            if (range->start < addr) {
+                result = range;
+                break;
+            } else {
+                node = node->rb_left;
+            }
+        } else if (comp == CompGreaterThan) {
+            if (range->end > addr) {
+                result = range;
+                break;
+            } else {
+                node = node->rb_right;
+            }
+        } else {
+            return NULL;
+        }
+    }
+
+    if (!node)
+        return NULL;
+
+    while (node) {
+        range = container_of(node, struct profile_range, node);
+
+        if (comp == CompLessThan) {
+            if (range->start >= addr)
+                break;
+
+            result = range;
+            node = rb_next(node);
+        } else if (comp == CompGreaterThan) {
+            if (range->end <= addr)
+                break;
+
+            result = range;
+            node = rb_prev(node);
+        }
+    }
+
+    return result;
+}
+
 static inline bool
 ranges_overlap(struct profile_range *r1, struct profile_range *r2)
 {
@@ -634,7 +692,6 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
     struct rb_root subranges = RB_ROOT;
     struct rb_node *range_node = NULL;
     bool passes_filter;
-    u64 section_base = mapaddr - section_off;
     u64 val;
 
     // If this isn't the process we care about, move on
@@ -671,22 +728,43 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
         passes_filter = section == filter->section;
 
         list_for_each_entry(comp, &filter->comparisons, node) {
+            enum mmap_comparator comparator;
+            if (!passes_filter)
+                break;
+
             // Determine the value for to use for this comparison
             if (comp->quant == QuantSectionOff) {
+                u64 section_base;
+                u64 search_key;
                 // Because ranges can be split, we need to handle this more
                 // carefully.
+
                 // Find the range to do the comparison on
-                u64 search_key = comp->val + section_base;
-                if (comp->comp == CompGreaterThan) {
+                // We need to account for the mmap section growing down
+                if (section == SectionMmap) {
+                    section_base = mapaddr + section_off;
+                    search_key = section_base - comp->val;
+
+                    if (comp->comp == CompGreaterThan)
+                        comparator = CompLessThan;
+                    else if (comp->comp == CompLessThan)
+                        comparator = CompGreaterThan;
+                } else {
+                    section_base = mapaddr - section_off;
+                    search_key = section_base + comp->val;
+                    comparator = comp->comp;
+                }
+
+                if (comparator == CompGreaterThan) {
                     search_key += PAGE_SIZE;
-                } if (comp->comp == CompLessThan) {
+                } if (comparator == CompLessThan) {
                     search_key -= PAGE_SIZE;
                 }
 
                 if (!parent_range) {
                     // Find the range to potentially split, and add it to
                     // temp_subranges
-                    parent_range = profile_search(&subranges, search_key);
+                    parent_range = profile_find_first_range(&subranges, search_key, comparator);
                     if (!parent_range) {
                         passes_filter = false;
                         break;
@@ -703,10 +781,10 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                     range->end = parent_range->end;
                     range->misses = parent_range->misses;
 
-                    profile_range_insert(&temp_subranges, range); 
+                    profile_range_insert(&temp_subranges, range);
                 } else {
                     // Find the range from the temp_subranges
-                    range = profile_search(&temp_subranges, search_key);
+                    range = profile_find_first_range(&temp_subranges, search_key, comparator);
                     if (!range) {
                         passes_filter = false;
                         break;
@@ -733,8 +811,8 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                 }
 
                 split_range->misses = 0;
-                if (comp->comp == CompGreaterThan) {
-                    if (range->start == search_key) {
+                if (comparator == CompGreaterThan) {
+                    if (range->start >= search_key) {
                         vfree(split_range);
                         split_range = NULL;
                         continue;
@@ -743,8 +821,8 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                     split_range->start = range->start;
                     split_range->end = search_key;
                     range->start = search_key;
-                } else if (comp->comp == CompLessThan) {
-                    if (range->end == search_key) {
+                } else if (comparator == CompLessThan) {
+                    if (range->end <= search_key) {
                         vfree(split_range);
                         split_range = NULL;
                         continue;
