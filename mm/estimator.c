@@ -265,30 +265,6 @@ profile_free_all(struct rb_root *ranges_root)
     }
 }
 
-//static void
-//print_profile(struct rb_root *ranges_root)
-//{
-//    struct rb_node *node = rb_first(ranges_root);
-//
-//    // We may not be able to write everything to the buffer. So we print
-//    // everything to printk instead.
-//
-//    pr_warn("mm_econ: profile...");
-//
-//    while (node) {
-//        struct profile_range *range =
-//            container_of(node, struct profile_range, node);
-//        pr_warn("mm_econ: [%llu, %llu) (%llu bytes) misses=%llu\n",
-//                range->start, range->end,
-//                (range->end - range->start),
-//                range->misses);
-//
-//        node = rb_next(node);
-//    }
-//
-//    pr_warn("mm_econ: END profile...");
-//}
-
 static void mmap_filters_free_all(struct mmap_filter_proc *proc)
 {
     struct mmap_filter *filter;
@@ -1279,6 +1255,57 @@ const struct file_operations proc_mmap_filters_operations = {
     .llseek = default_llseek,
 };
 
+static ssize_t print_profile(struct file *file,
+        char __user *buf, size_t count, loff_t *ppos)
+{
+    struct task_struct *task = extern_get_proc_task(file_inode(file));
+    char *buffer;
+    ssize_t len = 0;
+    ssize_t ret = 0;
+    struct mmap_filter_proc *proc;
+    struct rb_node *node = NULL;
+
+    // Find the data for the process this relates to
+    list_for_each_entry(proc, &filter_procs, node) {
+        if (proc->pid == task->tgid) {
+            node = rb_first(&proc->ranges_root);
+            break;
+        }
+    }
+    if (!node)
+        return 0;
+
+    buffer = vmalloc(sizeof(char) * MMAP_FILTER_BUF_SIZE);
+    if (!buffer)
+        return -ENOMEM;
+
+    while (node) {
+        struct profile_range *range =
+            container_of(node, struct profile_range, node);
+
+        len += sprintf(
+            &buffer[len],
+            "[0x%llx, 0x%llx) (%llu bytes) misses=0x%llx\n",
+            range->start,
+            range->end,
+            range->end - range->start,
+            range->misses
+        );
+
+        node = rb_next(node);
+    }
+
+    ret = simple_read_from_buffer(buf, count, ppos, buffer, len);
+
+    vfree(buffer);
+
+    return ret;
+}
+
+const struct file_operations proc_mem_ranges_operations = {
+    .read = print_profile,
+    .llseek = default_llseek,
+};
 ///////////////////////////////////////////////////////////////////////////////
 // Init
 

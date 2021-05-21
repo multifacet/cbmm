@@ -19,6 +19,7 @@
 #define MM_ECON_LTU 10000
 
 extern const struct file_operations proc_mmap_filters_operations;
+extern const struct file_operations proc_mem_ranges_operations;
 
 // An action that may be taken by the memory management subsystem.
 struct mm_action {

@@ -3105,6 +3105,7 @@ static const struct pid_entry tgid_base_stuff[] = {
 #endif
 #ifdef CONFIG_MM_ECON
     REG("mmap_filters", S_IRUGO|S_IWUSR, proc_mmap_filters_operations),
+    REG("mem_ranges", S_IRUGO, proc_mem_ranges_operations),
 #endif
 };
 
@@ -3498,6 +3499,7 @@ static const struct pid_entry tid_base_stuff[] = {
 #endif
 #ifdef CONFIG_MM_ECON
     REG("mmap_filters", S_IRUGO|S_IWUSR, proc_mmap_filters_operations),
+    REG("mem_ranges", S_IRUGO, proc_mem_ranges_operations),
 #endif
 };
 
