@@ -13,7 +13,8 @@
 
 #define HUGE_PAGE_ORDER 9
 
-#define MMAP_FILTER_BUF_SIZE 1024
+#define MMAP_FILTER_BUF_SIZE 2048
+#define MMAP_FILTER_BUF_DEAD_ZONE 128
 
 ///////////////////////////////////////////////////////////////////////////////
 // Globals...
@@ -1066,6 +1067,10 @@ static ssize_t mmap_filters_read(struct file *file,
 
         mm_memory_section_get_str(section, filter->section);
 
+        // Make sure we don't overflow the buffer
+        if (len > MMAP_FILTER_BUF_SIZE - MMAP_FILTER_BUF_DEAD_ZONE)
+            goto out;
+
         // Print the per filter information
         len += sprintf(&buffer[len], "%s,0x%llx", section, misses);
 
@@ -1073,6 +1078,10 @@ static ssize_t mmap_filters_read(struct file *file,
             mmap_quantity_get_str(quantity, comparison->quant);
             comparator = mmap_comparator_get_char(comparison->comp);
             val = comparison->val;
+
+            // Make sure we don't overflow the buffer
+            if (len > MMAP_FILTER_BUF_SIZE - MMAP_FILTER_BUF_DEAD_ZONE)
+                goto out;
 
             // Print the per comparison information
             len += sprintf(&buffer[len], ",%s,%c,0x%llx", quantity,
@@ -1364,6 +1373,10 @@ static ssize_t print_profile(struct file *file,
         struct profile_range *range =
             container_of(node, struct profile_range, node);
 
+        // Make sure we don't overflow the buffer
+        if (len > MMAP_FILTER_BUF_SIZE - MMAP_FILTER_BUF_DEAD_ZONE)
+            goto out;
+
         len += sprintf(
             &buffer[len],
             "[0x%llx, 0x%llx) (%llu bytes) misses=0x%llx\n",
@@ -1376,6 +1389,7 @@ static ssize_t print_profile(struct file *file,
         node = rb_next(node);
     }
 
+out:
     ret = simple_read_from_buffer(buf, count, ppos, buffer, len);
 
     vfree(buffer);
