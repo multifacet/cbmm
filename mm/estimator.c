@@ -1172,6 +1172,9 @@ static int mmap_filter_read_comparison(char **tok, struct mmap_comparison *c)
     }
 
     ret = get_mmap_quantity(value_buf, &c->quant);
+    if (ret != 0) {
+        return -1;
+    }
 
     // Get the comparator
     value_buf = strsep(tok, ",");
