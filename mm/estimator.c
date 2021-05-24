@@ -770,6 +770,13 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                         break;
                     }
 
+                    // If the found range has already matched with a filter, we
+                    // are done
+                    if (parent_range->misses != 0) {
+                        passes_filter = false;
+                        break;
+                    }
+
                     range = vmalloc(sizeof(struct profile_range));
                     if (!range) {
                         pr_warn("mm_add_mmap: no memory for new range");
@@ -789,13 +796,6 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                         passes_filter = false;
                         break;
                     }
-                }
-
-                // If the found range has already matched with a filter, we
-                // are done
-                if (range->misses != 0) {
-                    passes_filter = false;
-                    break;
                 }
 
                 // Assign the misses value.
