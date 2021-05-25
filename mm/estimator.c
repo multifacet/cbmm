@@ -170,6 +170,16 @@ profile_find_first_range(struct rb_root *ranges_root, u64 addr,
             } else {
                 node = node->rb_right;
             }
+        } else if (comp == CompEquals) {
+            if (range->start <= addr && addr < range->end) {
+                // Since only ranges do not overlap, we just need
+                // to find one range that overlaps with addr
+                return range;
+            } else if (range->start < addr) {
+                node = node->rb_right;
+            } else {
+                node = node->rb_left;
+            }
         } else {
             return NULL;
         }
@@ -664,6 +674,75 @@ static bool mm_does_quantity_match(struct mmap_comparison *c, u64 val)
     return false;
 }
 
+// Split base_range, which is in subranges, at addr based on comp and add
+// the new range(s) to subranges.
+static bool mm_split_ranges(struct profile_range *base_range, struct rb_root *subranges,
+        u64 addr, enum mmap_comparator comp)
+{
+    struct profile_range *split_range;
+
+    if (comp == CompGreaterThan) {
+        if (base_range->start >= addr) {
+            return true;
+        }
+
+        split_range = vmalloc(sizeof(struct profile_range));
+        if (!split_range)
+            return false;
+
+        split_range->misses = 0;
+        split_range->start = base_range->start;
+        split_range->end = addr;
+        base_range->start = addr;
+
+        profile_range_insert(subranges, split_range);
+    } else if (comp == CompLessThan) {
+        if (base_range->end <= addr) {
+            return true;
+        }
+
+        split_range = vmalloc(sizeof(struct profile_range));
+        if (!split_range)
+            return false;
+
+        split_range->misses = 0;
+        split_range->start = addr;
+        split_range->end = base_range->end;
+        base_range->end = addr;
+
+        profile_range_insert(subranges, split_range);
+    } else if (comp == CompEquals) {
+        // Do we need to split on the left?
+        if (base_range->start < addr) {
+            split_range = vmalloc(sizeof(struct profile_range));
+            if (!split_range)
+                return false;
+
+            split_range->misses = 0;
+            split_range->start = base_range->start;
+            split_range->end = addr;
+            base_range->start = addr;
+
+            profile_range_insert(subranges, split_range);
+        }
+        // Do we need to split on the right?
+        if (base_range->end > addr + PAGE_SIZE) {
+            split_range = vmalloc(sizeof(struct profile_range));
+            if (!split_range)
+                return false;
+
+            split_range->misses = 0;
+            split_range->start = addr + PAGE_SIZE;
+            split_range->end = base_range->end;
+            base_range->end = addr + PAGE_SIZE;
+
+            profile_range_insert(subranges, split_range);
+        }
+    }
+
+    return true;
+}
+
 // Search mmap_filters for a filter that matches this new memory map
 // and add it to the list of ranges.
 // pid: The pid of the process who made this mmap
@@ -722,7 +801,6 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
         struct rb_root temp_subranges = RB_ROOT;
         // The range in the subranges tree that we are splitting
         struct profile_range *parent_range = NULL;
-        struct profile_range *split_range = NULL;
 
         passes_filter = section == filter->section;
 
@@ -756,6 +834,8 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                         comparator = CompLessThan;
                     else if (comp->comp == CompLessThan)
                         comparator = CompGreaterThan;
+                    else
+                        comparator = comp->comp;
                 } else {
                     section_base = mapaddr - section_off;
                     search_key = section_base + comp->val;
@@ -803,39 +883,12 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                 range->misses = filter->misses;
 
                 // Split the range if necessary
-                split_range = vmalloc(sizeof(struct profile_range));
-                if (!split_range) {
+                if (!mm_split_ranges(range, &temp_subranges, search_key, comparator)) {
                     pr_warn("mm_add_mmap: no memory for new range");
                     profile_free_all(&subranges);
                     profile_free_all(&temp_subranges);
                     return;
                 }
-
-                split_range->misses = 0;
-                if (comparator == CompGreaterThan) {
-                    if (range->start >= search_key) {
-                        vfree(split_range);
-                        split_range = NULL;
-                        continue;
-                    }
-
-                    split_range->start = range->start;
-                    split_range->end = search_key;
-                    range->start = search_key;
-                } else if (comparator == CompLessThan) {
-                    if (range->end <= search_key) {
-                        vfree(split_range);
-                        split_range = NULL;
-                        continue;
-                    }
-
-                    split_range->start = search_key;
-                    split_range->end = range->end;
-                    range->end = search_key;
-                }
-
-                // If we split the range, add it to the tree
-                profile_range_insert(&temp_subranges, split_range);
 
                 continue;
             }
