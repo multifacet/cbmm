@@ -757,12 +757,6 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                     comparator = comp->comp;
                 }
 
-                if (comparator == CompGreaterThan) {
-                    search_key += PAGE_SIZE;
-                } if (comparator == CompLessThan) {
-                    search_key -= PAGE_SIZE;
-                }
-
                 if (!parent_range) {
                     // Find the range to potentially split, and add it to
                     // temp_subranges
