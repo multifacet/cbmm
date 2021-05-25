@@ -10,6 +10,7 @@
 #include <linux/hashtable.h>
 #include <linux/mm_stats.h>
 #include <linux/sched/loadavg.h>
+#include <linux/sched/task.h>
 
 #define HUGE_PAGE_ORDER 9
 
@@ -1040,9 +1041,14 @@ static ssize_t mmap_filters_read(struct file *file,
     struct mmap_filter_proc *proc;
     struct list_head *filter_head = NULL;
 
+    if (!task)
+        return -ESRCH;
+
     buffer = vmalloc(sizeof(char) * MMAP_FILTER_BUF_SIZE);
-    if (!buffer)
+    if (!buffer) {
+        put_task_struct(task);
         return -ENOMEM;
+    }
 
     // First, print the CSV Header for easier reading
     len = sprintf(buffer, "SECTION,MISSES,CONSTRAINTS...\n");
@@ -1097,6 +1103,8 @@ out:
 
     // Remember to free the buffer
     vfree(buffer);
+
+    put_task_struct(task);
 
     return ret;
 }
@@ -1229,6 +1237,9 @@ static ssize_t mmap_filters_write(struct file *file,
     u64 value;
     char * value_buf;
 
+    if (!task)
+        return -ESRCH;
+
     // See if a an entry already exists for this process
     list_for_each_entry(proc, &filter_procs, node) {
         if (proc->pid == task->tgid) {
@@ -1336,6 +1347,7 @@ err:
         if (alloc_new_proc)
             vfree(proc);
     }
+    put_task_struct(task);
     return error;
 }
 
@@ -1355,6 +1367,9 @@ static ssize_t print_profile(struct file *file,
     struct mmap_filter_proc *proc;
     struct rb_node *node = NULL;
 
+    if (!task)
+        return -ESRCH;
+
     // Find the data for the process this relates to
     list_for_each_entry(proc, &filter_procs, node) {
         if (proc->pid == task->tgid) {
@@ -1362,12 +1377,16 @@ static ssize_t print_profile(struct file *file,
             break;
         }
     }
-    if (!node)
+    if (!node) {
+        put_task_struct(task);
         return 0;
+    }
 
     buffer = vmalloc(sizeof(char) * MMAP_FILTER_BUF_SIZE);
-    if (!buffer)
+    if (!buffer) {
+        put_task_struct(task);
         return -ENOMEM;
+    }
 
     while (node) {
         struct profile_range *range =
@@ -1393,6 +1412,8 @@ out:
     ret = simple_read_from_buffer(buf, count, ppos, buffer, len);
 
     vfree(buffer);
+
+    put_task_struct(task);
 
     return ret;
 }
