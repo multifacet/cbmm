@@ -40,8 +40,7 @@ struct profile_range {
 enum mmap_comparator {
     CompEquals,
     CompGreaterThan,
-    CompLessThan,
-    CompIgnore
+    CompLessThan
 };
 
 // The different quantities that can be compared in an mmap
@@ -656,8 +655,6 @@ static bool mm_does_quantity_match(struct mmap_comparison *c, u64 val)
         return val > c->val;
     } else if (c->comp == CompLessThan) {
         return val < c->val;
-    } else if (c->comp == CompIgnore) {
-        return true;
     } else {
         pr_err("Invalid mmap comparatori\n");
         BUG();
@@ -1001,8 +998,6 @@ static char mmap_comparator_get_char(enum mmap_comparator comp)
         return '>';
     } else if (comp == CompLessThan) {
         return '<';
-    } else if (comp == CompIgnore) {
-        return ' ';
     } else {
         printk(KERN_WARNING "Invalid mmap comparator");
         BUG();
@@ -1165,12 +1160,6 @@ static int get_mmap_comparator(char *buf, enum mmap_comparator *comp)
         *comp = CompGreaterThan;
     } else if (strcmp(buf, "<") == 0) {
         *comp = CompLessThan;
-    } else if (strcmp(buf, " ") == 0 || buf[0] == '\0') {
-        // The above condition covers when the ignored option in the CSV
-        // is written as ", ," or ",,"
-        // If there was nothing before the , that means this quantity
-        // should be ignored
-        *comp = CompIgnore;
     } else {
         ret = -1;
     }
@@ -1213,8 +1202,7 @@ static int mmap_filter_read_comparison(char **tok, struct mmap_comparison *c)
     }
 
     ret = kstrtoull(value_buf, 0, &value);
-    // We're fine with the value being invalid if it's ignored
-    if (ret != 0 && c->comp != CompIgnore) {
+    if (ret != 0) {
         return -1;
     }
 
