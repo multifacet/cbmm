@@ -14,7 +14,7 @@
 
 #define HUGE_PAGE_ORDER 9
 
-#define MMAP_FILTER_BUF_SIZE 2048
+#define MMAP_FILTER_BUF_SIZE 4096
 #define MMAP_FILTER_BUF_DEAD_ZONE 128
 
 ///////////////////////////////////////////////////////////////////////////////
