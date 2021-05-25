@@ -733,7 +733,7 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
             if (!passes_filter)
                 break;
 
-            // Determine the value for to use for this comparison
+            // Determine the value to use for this comparison
             if (comp->quant == QuantSectionOff) {
                 u64 section_base;
                 u64 search_key;
