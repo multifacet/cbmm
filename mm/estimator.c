@@ -913,6 +913,7 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
         if (passes_filter && parent_range) {
             range_node = &parent_range->node;
             rb_erase(range_node, &subranges);
+            vfree(parent_range);
 
             profile_move(&temp_subranges, &subranges);
         }
