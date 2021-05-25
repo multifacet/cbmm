@@ -730,12 +730,20 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
         passes_filter = section == filter->section;
 
         list_for_each_entry(comp, &filter->comparisons, node) {
-            enum mmap_comparator comparator;
             if (!passes_filter)
                 break;
 
             // Determine the value to use for this comparison
             if (comp->quant == QuantSectionOff) {
+                // This type of filter comparison is the most complex because
+                // it may cause the region to be split one or more times.
+                // This happens when the new region overlaps with multiple filters.
+                // To handle this case, while we check if the region matches the
+                // filter, we also keep track of how we would need to split the
+                // regions using temp_subregions. These subregions then replace
+                // the larger region if the filter passes the region.
+
+                enum mmap_comparator comparator;
                 u64 section_base;
                 u64 search_key;
                 // Because ranges can be split, we need to handle this more
