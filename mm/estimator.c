@@ -143,6 +143,8 @@ profile_search(struct rb_root *ranges_root, u64 addr)
 
 /*
  * Search the tree for the first range that satisfies the condition
+ * of "there exists some address x in range s.t. x <comp> addr."
+ * This is only used for filter comparisons on the section_off quantity
  */
 static struct profile_range *
 profile_find_first_range(struct rb_root *ranges_root, u64 addr,
@@ -825,6 +827,10 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                 // carefully.
 
                 // Find the range to do the comparison on
+                // This step basically involves converting the section offset
+                // given in the filter to a virtual address corresponding to
+                // that offset. We need to do this because the memory ranges
+                // we are operating on are virtual addresses.
                 // We need to account for the mmap section growing down
                 if (section == SectionMmap) {
                     section_base = mapaddr + section_off;
