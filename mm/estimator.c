@@ -1275,20 +1275,35 @@ static ssize_t mmap_filters_write(struct file *file,
         const char __user *buf, size_t count,
         loff_t *ppos)
 {
-    struct task_struct *task = extern_get_proc_task(file_inode(file));
-    char *outerTok = (char *)buf;
+    struct task_struct *task = NULL;
+    char *buf_from_user = NULL;
+    char *outerTok = NULL;
     char *tok = NULL;
     struct mmap_filter *filter = NULL;
     struct mmap_comparison *comparison = NULL;
-    struct mmap_filter_proc *proc;
+    struct mmap_filter_proc *proc = NULL;
     bool alloc_new_proc = true;
     ssize_t error = 0;
     int ret;
     u64 value;
     char * value_buf;
 
-    if (!task)
-        return -ESRCH;
+    // Copy the input from userspace
+    buf_from_user = vmalloc(sizeof(char) * (count + 1));
+    if (!buf_from_user)
+        return -ENOMEM;
+    if (copy_from_user(buf_from_user, buf, count)) {
+        error = -EFAULT;
+        goto err;
+    }
+    buf_from_user[count] = 0;
+    outerTok = buf_from_user;
+
+    task = extern_get_proc_task(file_inode(file));
+    if (!task) {
+        error = -ESRCH;
+        goto err;
+    }
 
     // See if a an entry already exists for this process
     list_for_each_entry(proc, &filter_procs, node) {
@@ -1387,6 +1402,9 @@ static ssize_t mmap_filters_write(struct file *file,
         list_add_tail(&proc->node, &filter_procs);
     }
 
+    vfree(buf_from_user);
+    put_task_struct(task);
+
     return count;
 
 err:
@@ -1397,7 +1415,10 @@ err:
         if (alloc_new_proc)
             vfree(proc);
     }
-    put_task_struct(task);
+    if (task)
+        put_task_struct(task);
+    if (buf_from_user)
+        vfree(buf_from_user);
     return error;
 }
 
