@@ -95,6 +95,10 @@ static u64 mm_econ_num_decisions = 0;
 static u64 mm_econ_num_decisions_yes = 0;
 // Number of huge page promotions in #PFs.
 static u64 mm_econ_num_hp_promotions = 0;
+// Number of times we decided to run async compaction.
+static u64 mm_econ_num_async_compaction = 0;
+// Number of times we decided to run async prezeroing.
+static u64 mm_econ_num_async_prezeroing = 0;
 
 extern inline struct task_struct *extern_get_proc_task(const struct inode *inode);
 
@@ -593,8 +597,9 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
 
         case MM_ACTION_RUN_DEFRAG:
             mm_estimate_daemon_cost(action, cost);
-            // TODO(markm)
-            cost->benefit = 0;
+            cost->benefit = 0; // TODO(markm)
+            if (cost->cost < cost->benefit)
+                mm_econ_num_async_compaction += 1;
             break;
 
         case MM_ACTION_RUN_PROMOTION:
@@ -606,6 +611,8 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
         case MM_ACTION_RUN_PREZEROING:
             mm_estimate_daemon_cost(action, cost);
             mm_estimate_async_prezeroing_benefit(action, cost);
+            if (cost->cost < cost->benefit)
+                mm_econ_num_async_prezeroing += 1;
             break;
 
         case MM_ACTION_ALLOC_RECLAIM: // Alloc reclaim for thp allocation.
@@ -637,15 +644,19 @@ EXPORT_SYMBOL(mm_estimate_changes);
 // action associated with `cost` should be TAKEN, and false otherwise.
 bool mm_decide(const struct mm_cost_delta *cost)
 {
+    bool should_do;
     mm_econ_num_decisions += 1;
 
     if (mm_econ_mode == 0) {
         return true;
     } else if (mm_econ_mode == 1) {
-        mm_econ_num_decisions_yes += 1;
+        should_do = cost->benefit > cost->cost;
+
+        if (should_do)
+            mm_econ_num_decisions_yes += 1;
 
         //pr_warn("mm_econ: cost=%llu benefit=%llu\n", cost->cost, cost->benefit); // TODO remove
-        return cost->benefit > cost->cost;
+        return should_do;
     } else {
         BUG();
         return false;
@@ -1005,11 +1016,14 @@ static ssize_t stats_show(struct kobject *kobj,
 {
     return sprintf(buf,
             "estimated=%lld\ndecided=%lld\n"
-            "yes=%lld\npromoted=%lld\n",
+            "yes=%lld\npromoted=%lld\n"
+            "compactions=%lld\nprezerotry=%lld\n",
             mm_econ_num_estimates,
             mm_econ_num_decisions,
             mm_econ_num_decisions_yes,
-            mm_econ_num_hp_promotions);
+            mm_econ_num_hp_promotions,
+            mm_econ_num_async_compaction,
+            mm_econ_num_async_prezeroing);
 }
 
 static ssize_t stats_store(struct kobject *kobj,
