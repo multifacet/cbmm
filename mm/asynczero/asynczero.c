@@ -210,8 +210,12 @@ static int asynczero_do_work(void *data)
 		};
 		bool should_run;
 
-		mm_estimate_changes(&mm_action, &mm_cost_delta);
-		should_run = mm_decide(&mm_cost_delta);
+		if (mm_econ_is_on()) {
+			mm_estimate_changes(&mm_action, &mm_cost_delta);
+			should_run = mm_decide(&mm_cost_delta);
+		} else {
+			should_run = true;
+		}
 
 		// If worth it, zero some pages.
 		if (should_run) zero_n_pages(count);
