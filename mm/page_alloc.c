@@ -393,7 +393,7 @@ u64 mm_estimated_prezeroed_used(void)
 		}
 	}
 
-	if (min == 0) return 0;
+	if (min == 0 || min == max) return 0;
 
 	// This is the time to allocate (LFPA_N - 1) pages.
 	diff = max - min;
