@@ -18,11 +18,17 @@
 static struct task_struct *asynczero_task = NULL;
 static volatile bool asynczero_should_stop = false;
 
+// Only used if mm_econ is off.
 int sleep = 1000;
 module_param(sleep, int, 0644);
 
 int count = 10;
 module_param(count, int, 0644);
+
+// For debugging...
+// 0 = mm_econ, 1 = act as if mm_econ is off (even if it is on)
+int mode = 0;
+module_param(mode, int, 0644);
 
 //int zero_fill_order = MAX_ORDER - 1;
 //module_param(zero_fill_order, int, 0644);
@@ -138,10 +144,7 @@ static int zero_fill_zone_pages(struct zone *zone, int *n)
 			// One down... (n-1) to go...
 			*n -= 1 << order;
 			if (*n <= 0) {
-				if (mm_econ_is_on())
-					return 0;
-				else
-					msleep(sleep);
+				return 0;
 			}
 		}
 	}
@@ -165,15 +168,16 @@ static void zero_n_pages(int n)
 	int ret;
 	bool all_zeroed = false;
 
-	while (true) {
-		// If this is true when we start going through zones from the
-		// beginning again, then it is likely all zones are zeroed (it
-		// could be just the last zone, though... best effort).
-		if (all_zeroed) return;
+	if (current_zone == NULL)
+		current_zone = (first_online_pgdat())->node_zones;
 
-		for_each_zone(current_zone) {
-			if (!populated_zone(current_zone) || skip_zone(current_zone))
+	while (true) {
+		// starts from wherever we left off last time...
+		while(current_zone) {
+			if (!populated_zone(current_zone) || skip_zone(current_zone)) {
+				current_zone = next_zone(current_zone);
 				continue;
+			}
 
 			ret = zero_fill_zone_pages(current_zone, &n);
 
@@ -181,9 +185,11 @@ static void zero_n_pages(int n)
 				case -2:
 					all_zeroed = true;
 					break;
-				case -1:
 				case 0:
 					all_zeroed = false;
+					break;
+
+				case -1:
 					break;
 
 				default:
@@ -192,10 +198,16 @@ static void zero_n_pages(int n)
 
 			// If we have zeroed enough, exit for now.
 			if (n <= 0) return;
+
+			current_zone = next_zone(current_zone);
 		}
 
-		// just being carefull... shouldn't make a difference.
-		current_zone = NULL;
+		// restart from the beginning next time.
+		current_zone = (first_online_pgdat())->node_zones;
+
+		// If this is true it is likely all zones are zeroed (it
+		// could be just the last zone, though... best effort).
+		if (all_zeroed) return;
 	}
 }
 
@@ -210,7 +222,7 @@ static int asynczero_do_work(void *data)
 		};
 		bool should_run;
 
-		if (mm_econ_is_on()) {
+		if (mm_econ_is_on() && mode == 0) {
 			mm_estimate_changes(&mm_action, &mm_cost_delta);
 			should_run = mm_decide(&mm_cost_delta);
 		} else {
@@ -221,7 +233,7 @@ static int asynczero_do_work(void *data)
 		if (should_run) zero_n_pages(count);
 
 		// Yield CPU.
-		if (mm_econ_is_on())
+		if (mm_econ_is_on() && mode == 0)
 			cond_resched();
 		else
 			msleep(sleep);
