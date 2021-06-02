@@ -1389,7 +1389,7 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	mm_estimate_changes(&mm_action, &mm_cost_delta);
 	should_do = mm_decide(&mm_cost_delta);
 
-	if (should_do) {
+	if (should_do && mm_econ_is_on()) {
 		flags |= MAP_POPULATE;
 	}
 
