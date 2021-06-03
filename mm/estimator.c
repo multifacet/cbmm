@@ -963,21 +963,29 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
 
 void mm_profile_check_exiting_proc(pid_t pid)
 {
+    bool proc_found = false;
     struct mmap_filter_proc *proc;
-    down_write(&filter_procs_sem);
+
+    down_read(&filter_procs_sem);
     list_for_each_entry(proc, &filter_procs, node) {
         if (proc->pid == pid) {
-            // If the process exits, we should also clear its profile
-            profile_free_all(&proc->ranges_root);
-            mmap_filters_free_all(proc);
-
-            // Remove the node from the list
-            list_del(&proc->node);
-            vfree(proc);
+            proc_found = true;
             break;
         }
     }
-    up_write(&filter_procs_sem);
+    up_read(&filter_procs_sem);
+
+    if (proc_found) {
+        down_write(&filter_procs_sem);
+        // If the process exits, we should also clear its profile
+        profile_free_all(&proc->ranges_root);
+        mmap_filters_free_all(proc);
+
+        // Remove the node from the list
+        list_del(&proc->node);
+        vfree(proc);
+        up_write(&filter_procs_sem);
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
