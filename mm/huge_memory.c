@@ -1054,6 +1054,10 @@ out:
 }
 EXPORT_SYMBOL_GPL(thp_get_unmapped_area);
 
+// markm: defined in page_alloc.c... but I don't want to touch one of the big
+// header files and have to recompile everything...
+inline void lfpa_update(u64);
+
 static vm_fault_t __do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 			struct page *page, gfp_t gfp,
 		        struct mm_stats_pftrace *pftrace)
@@ -1079,6 +1083,7 @@ static vm_fault_t __do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 	}
 
 	pftrace->prep_start_tsc = rdtsc();
+	lfpa_update(rdtsc());
 	if(PageZeroed(page))
 		mm_stats_set_flag(pftrace, MM_STATS_PF_ALLOC_PREZEROED);
 	else

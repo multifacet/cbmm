@@ -357,7 +357,7 @@ static atomic_t lfpa_head = ATOMIC_INIT(0);
 
 // Update the lfpa array by adding the given timestamp counter value at the
 // end atomically and incrementing the head index.
-static inline void lfpa_update(u64 ts) {
+inline void lfpa_update(u64 ts) {
 	while (true) {
 		int i = atomic_read(&lfpa_head);
 		int inew = (i == (LFPA_N - 1)) ? 0 : (i + 1);
