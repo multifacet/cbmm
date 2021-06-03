@@ -11,6 +11,7 @@
 #include <linux/mm_stats.h>
 #include <linux/sched/loadavg.h>
 #include <linux/sched/task.h>
+#include <linux/rwsem.h>
 
 #define HUGE_PAGE_ORDER 9
 
@@ -81,6 +82,7 @@ struct mmap_filter_proc {
 
 // List of processes using mmap filters
 static LIST_HEAD(filter_procs);
+static DECLARE_RWSEM(filter_procs_sem);
 
 // The TLB misses estimator, if any.
 static mm_econ_tlb_miss_estimator_fn_t tlb_miss_est_fn = NULL;
@@ -415,6 +417,7 @@ compute_hpage_benefit_from_profile(
     struct mmap_filter_proc *proc;
     struct profile_range *range = NULL;
 
+    down_read(&filter_procs_sem);
     list_for_each_entry(proc, &filter_procs, node) {
         if (proc->pid == current->tgid) {
             range = profile_search(&proc->ranges_root, action->address);
@@ -431,6 +434,7 @@ compute_hpage_benefit_from_profile(
         //        (range->end - range->start) >> HPAGE_SHIFT,
         //        ret);
     }
+    up_read(&filter_procs_sem);
 
     return ret;
 }
@@ -786,12 +790,14 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
     u64 val;
 
     // If this isn't the process we care about, move on
+    down_read(&filter_procs_sem);
     list_for_each_entry(proc, &filter_procs, node) {
         if (proc->pid == pid) {
             filter_head = &proc->filters;
             break;
         }
     }
+    up_read(&filter_procs_sem);
     if (!filter_head)
         return;
 
@@ -808,6 +814,7 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
     profile_range_insert(&subranges, range);
 
     // Check if this mmap matches any of our filters
+    down_read(&filter_procs_sem);
     list_for_each_entry(filter, filter_head, node) {
         // We need a second rb_tree because we don't want to change the
         // subranges tree unless we are sure a filter matches
@@ -880,6 +887,7 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                         pr_warn("mm_add_mmap: no memory for new range");
                         profile_free_all(&subranges);
                         profile_free_all(&temp_subranges);
+                        up_read(&filter_procs_sem);
                         return;
                     }
                     range->start = parent_range->start;
@@ -904,6 +912,7 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                     pr_warn("mm_add_mmap: no memory for new range");
                     profile_free_all(&subranges);
                     profile_free_all(&temp_subranges);
+                    up_read(&filter_procs_sem);
                     return;
                 }
 
@@ -953,9 +962,12 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
             break;
         }
     }
+    up_read(&filter_procs_sem);
 
     // Finally, insert all of the new ranges into the proc's tree
+    down_write(&filter_procs_sem);
     profile_move(&subranges, &proc->ranges_root);
+    up_write(&filter_procs_sem);
 
     //printk("Added range %d %llx %llx %lld %llx\n", section, range->start, range->end, range->misses, len);
 }
@@ -963,6 +975,7 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
 void mm_profile_check_exiting_proc(pid_t pid)
 {
     struct mmap_filter_proc *proc;
+    down_write(&filter_procs_sem);
     list_for_each_entry(proc, &filter_procs, node) {
         if (proc->pid == pid) {
             // If the process exits, we should also clear its profile
@@ -975,6 +988,7 @@ void mm_profile_check_exiting_proc(pid_t pid)
             break;
         }
     }
+    up_write(&filter_procs_sem);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1125,6 +1139,7 @@ static ssize_t mmap_filters_read(struct file *file,
     len = sprintf(buffer, "SECTION,MISSES,CONSTRAINTS...\n");
 
     // Find the filters that correspond to this process if there are any
+    down_read(&filter_procs_sem);
     list_for_each_entry(proc, &filter_procs, node) {
         if (proc->pid == task->tgid) {
             filter_head = &proc->filters;
@@ -1170,6 +1185,8 @@ static ssize_t mmap_filters_read(struct file *file,
     }
 
 out:
+    up_read(&filter_procs_sem);
+
     ret = simple_read_from_buffer(buf, count, ppos, buffer, len);
 
     // Remember to free the buffer
@@ -1320,6 +1337,7 @@ static ssize_t mmap_filters_write(struct file *file,
     }
 
     // See if a an entry already exists for this process
+    down_write(&filter_procs_sem);
     list_for_each_entry(proc, &filter_procs, node) {
         if (proc->pid == task->tgid) {
             alloc_new_proc = false;
@@ -1329,6 +1347,7 @@ static ssize_t mmap_filters_write(struct file *file,
             break;
         }
     }
+    up_write(&filter_procs_sem);
 
     // Allocate the proc structure if necessary
     if (alloc_new_proc) {
@@ -1405,7 +1424,9 @@ static ssize_t mmap_filters_write(struct file *file,
         }
 
         // Add the new filter to the list
+        down_write(&filter_procs_sem);
         list_add_tail(&filter->node, &proc->filters);
+        up_write(&filter_procs_sem);
 
         // Get the next filter
         tok = strsep(&outerTok, "\n");
@@ -1413,7 +1434,9 @@ static ssize_t mmap_filters_write(struct file *file,
 
     // Link the new proc if we need to
     if (alloc_new_proc) {
+        down_write(&filter_procs_sem);
         list_add_tail(&proc->node, &filter_procs);
+        up_write(&filter_procs_sem);
     }
 
     vfree(buf_from_user);
@@ -1425,7 +1448,9 @@ err:
     if (filter)
         vfree (filter);
     if (proc) {
+        down_write(&filter_procs_sem);
         mmap_filters_free_all(proc);
+        up_write(&filter_procs_sem);
         if (alloc_new_proc)
             vfree(proc);
     }
@@ -1456,12 +1481,14 @@ static ssize_t print_profile(struct file *file,
         return -ESRCH;
 
     // Find the data for the process this relates to
+    down_read(&filter_procs_sem);
     list_for_each_entry(proc, &filter_procs, node) {
         if (proc->pid == task->tgid) {
             node = rb_first(&proc->ranges_root);
             break;
         }
     }
+    up_read(&filter_procs_sem);
     if (!node) {
         put_task_struct(task);
         return 0;
@@ -1473,6 +1500,7 @@ static ssize_t print_profile(struct file *file,
         return -ENOMEM;
     }
 
+    down_read(&filter_procs_sem);
     while (node) {
         struct profile_range *range =
             container_of(node, struct profile_range, node);
@@ -1494,6 +1522,8 @@ static ssize_t print_profile(struct file *file,
     }
 
 out:
+    up_read(&filter_procs_sem);
+
     ret = simple_read_from_buffer(buf, count, ppos, buffer, len);
 
     vfree(buffer);
