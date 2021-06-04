@@ -513,7 +513,7 @@ mm_estimate_daemon_cost(
     __kernel_ulong_t loads[3]; /* 1, 5, and 15 minute load averages */
     int ncpus = num_online_cpus();
 
-    get_avenrun(loads, 0, SI_LOAD_SHIFT - FSHIFT);
+    get_avenrun(loads, FIXED_1/200, 0);
 
     // If we have more cpus than load, running a background daemon is free.
     // Otherwise, the cost is however many cycles the daemon runs, as this is

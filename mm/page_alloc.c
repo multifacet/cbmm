@@ -71,6 +71,7 @@
 #include <linux/mm_stats.h>
 #include <linux/cpufreq.h>
 #include <linux/mm_econ.h>
+#include <linux/cpufreq.h>
 
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
@@ -397,7 +398,7 @@ u64 mm_estimated_prezeroed_used(void)
 
 	// This is the time to allocate (LFPA_N - 1) pages.
 	diff = max - min;
-	freq = (u64) cpufreq_get(smp_processor_id()); // khz
+	freq = (u64) arch_freq_get_on_cpu(smp_processor_id()); // khz
 
 	// We can now compute allocs per LTU.
 	return (LFPA_N - 1) * freq * MM_ECON_LTU / diff;
