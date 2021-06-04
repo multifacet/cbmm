@@ -961,6 +961,102 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
     //printk("Added range %d %llx %llx %lld %llx\n", section, range->start, range->end, range->misses, len);
 }
 
+void mm_copy_profile(pid_t old_pid, pid_t new_pid)
+{
+    bool proc_found = false;
+    struct mmap_filter_proc *proc = NULL;
+    struct mmap_filter_proc *new_proc = NULL;
+    struct mmap_filter *filter = NULL;
+    struct mmap_filter *new_filter = NULL;
+    struct mmap_comparison *comparison = NULL;
+    struct mmap_comparison *new_comparison = NULL;
+    struct profile_range *range = NULL;
+    struct profile_range *new_range = NULL;
+    struct rb_node *node = NULL;
+
+    down_read(&filter_procs_sem);
+
+    // First, find out if a profile for old_pid exists
+    list_for_each_entry(proc, &filter_procs, node) {
+        if (proc->pid == old_pid) {
+            proc_found = true;
+            break;
+        }
+    }
+
+    if (!proc_found) {
+        up_read(&filter_procs_sem);
+        return;
+    }
+
+    new_proc = vmalloc(sizeof(struct mmap_filter_proc));
+    if (!new_proc)
+        goto err;
+    new_proc->pid = new_pid;
+    INIT_LIST_HEAD(&new_proc->filters);
+    new_proc->ranges_root = RB_ROOT;
+
+    // First, copy the filters
+    list_for_each_entry(filter, &proc->filters, node) {
+        new_filter = vmalloc(sizeof(struct mmap_filter));
+        if (!new_filter)
+            goto err;
+
+        new_filter->section = filter->section;
+        new_filter->misses = filter->misses;
+        INIT_LIST_HEAD(&new_filter->comparisons);
+
+        list_add_tail(&new_filter->node, &new_proc->filters);
+
+        list_for_each_entry(comparison, &filter->comparisons, node) {
+            new_comparison = vmalloc(sizeof(struct mmap_comparison));
+            if (!new_comparison)
+                goto err;
+
+            new_comparison->quant = comparison->quant;
+            new_comparison->comp = comparison->comp;
+            new_comparison->val = comparison->val;
+
+            list_add_tail(&new_comparison->node, &new_filter->comparisons);
+        }
+    }
+
+    // Now, copy the ranges
+    node = rb_first(&proc->ranges_root);
+    while (node) {
+        new_range = vmalloc(sizeof(struct profile_range));
+        if (!new_range)
+            goto err;
+
+        range = container_of(node, struct profile_range, node);
+        new_range->start = range->start;
+        new_range->end = range->end;
+        new_range->misses = range->misses;
+
+        profile_range_insert(&new_proc->ranges_root, new_range);
+
+        node = rb_next(node);
+    }
+
+    up_read(&filter_procs_sem);
+
+    // Now, add the new proc to the list of procs
+    down_write(&filter_procs_sem);
+    list_add_tail(&new_proc->node, &filter_procs);
+    up_write(&filter_procs_sem);
+
+    return;
+err:
+    up_read(&filter_procs_sem);
+
+    pr_warn("mm_econ: Unable to copy profile from %d to %d", old_pid, new_pid);
+    if (new_proc) {
+        profile_free_all(&new_proc->ranges_root);
+        mmap_filters_free_all(new_proc);
+        vfree(new_proc);
+    }
+}
+
 void mm_profile_check_exiting_proc(pid_t pid)
 {
     bool proc_found = false;
