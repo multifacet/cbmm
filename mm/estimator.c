@@ -1426,7 +1426,7 @@ static ssize_t mmap_filters_write(struct file *file,
         goto err;
     }
 
-    // See if a an entry already exists for this process
+    // See if an entry already exists for this process
     down_write(&filter_procs_sem);
     list_for_each_entry(proc, &filter_procs, node) {
         if (proc->pid == task->tgid) {
