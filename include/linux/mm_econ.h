@@ -87,7 +87,6 @@ mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr, u64 
         u64 addr, u64 len, u64 prot, u64 flags, u64 fd, u64 off);
 
 void mm_copy_profile(pid_t old_pid, pid_t new_pid);
-void mm_profile_register_process(char *comm, pid_t pid);
 void mm_profile_check_exiting_proc(pid_t pid);
 
 u64 mm_estimated_prezeroed_used(void);
