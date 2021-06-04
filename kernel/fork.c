@@ -95,6 +95,7 @@
 #include <linux/stackleak.h>
 #include <linux/kasan.h>
 #include <linux/badger_trap.h>
+#include <linux/mm_econ.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -2448,6 +2449,9 @@ long _do_fork(struct kernel_clone_args *args)
 		init_completion(&vfork);
 		get_task_struct(p);
 	}
+
+	/* Copy the mm_econ profile if applicable */
+	mm_copy_profile(current->tgid, p->tgid);
 
 	wake_up_new_task(p);
 
