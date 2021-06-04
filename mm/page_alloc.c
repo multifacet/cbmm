@@ -4876,7 +4876,7 @@ out:
 		page = NULL;
 	}
 
-	// markm: update if we allocated a prezeroed page.
+	// markm: update if we allocated a zeroed large allocation.
 	// For now, we mostly care about huge pages.
 	if (page && (gfp_mask & __GFP_ZERO) && (order >= 9)) {
 		lfpa_update(rdtsc());
