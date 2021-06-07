@@ -114,7 +114,7 @@ static int set_brk(unsigned long start, unsigned long end, int prot)
 		if (error)
 			return error;
 	}
-	current->mm->start_brk = current->mm->brk = end;
+	current->mm->start_brk = current->mm->brk = ALIGN(end, HPAGE_SIZE);
 	return 0;
 }
 

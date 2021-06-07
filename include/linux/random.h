@@ -107,6 +107,7 @@ declare_get_random_var_wait(long)
 #undef declare_get_random_var
 
 unsigned long randomize_page(unsigned long start, unsigned long range);
+unsigned long randomize_huge_page(unsigned long start, unsigned long range);
 
 u32 prandom_u32(void);
 void prandom_bytes(void *buf, size_t nbytes);
