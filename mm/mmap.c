@@ -227,8 +227,8 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 			      mm->end_data, mm->start_data))
 		goto out;
 
-	newbrk = PAGE_ALIGN(brk);
-	oldbrk = PAGE_ALIGN(mm->brk);
+	newbrk = ALIGN(brk, HPAGE_SIZE);
+	oldbrk = ALIGN(mm->brk, HPAGE_SIZE);
 	if (oldbrk == newbrk) {
 		mm->brk = brk;
 		goto success;
