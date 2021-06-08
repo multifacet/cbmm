@@ -127,6 +127,8 @@ static int zero_fill_zone_pages(struct zone *zone, int *n)
 				continue;
 			}
 			list_del(&page->lru);
+			__ClearPageBuddy(page);
+			set_page_private(page, 0);
 			area->nr_free--;
 			spin_unlock_irqrestore(&zone->lock, flags);
 
@@ -136,6 +138,8 @@ static int zero_fill_zone_pages(struct zone *zone, int *n)
 
 			// add back to freelist
 			spin_lock_irqsave(&zone->lock, flags);
+			set_page_private(page, order);
+			__SetPageBuddy(page);
 			list_add(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
 			area->nr_free++;
 			spin_unlock_irqrestore(&zone->lock, flags);
