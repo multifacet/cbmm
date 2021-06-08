@@ -102,7 +102,8 @@ static inline void zero_fill_compound_page(struct page *page, int order)
 static int zero_fill_zone_pages(struct zone *zone, int *n)
 {
 	struct page *page;
-	struct free_area *area;
+    struct free_area *area;
+    pg_data_t *pgdat;
 	unsigned long flags;
 	int order;
 	bool zeroed_something = false;
@@ -120,18 +121,21 @@ static int zero_fill_zone_pages(struct zone *zone, int *n)
 				spin_unlock_irqrestore(&zone->lock, flags);
 				break;
 			}
+
+            pgdat = page_pgdat(page);
+
 			if (PageZeroed(page)) {
 				retries++;
-                spin_lock(&zone->zone_pgdat->lru_lock);
+                spin_lock(&pgdat->lru_lock);
 				list_rotate_to_front(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
-                spin_unlock(&zone->zone_pgdat->lru_lock);
+                spin_unlock(&pgdat->lru_lock);
 				spin_unlock_irqrestore(&zone->lock, flags);
 				continue;
 			}
-            spin_lock(&zone->zone_pgdat->lru_lock);
+            spin_lock(&pgdat->lru_lock);
 			list_del(&page->lru);
-            spin_unlock(&zone->zone_pgdat->lru_lock);
 			area->nr_free--;
+            spin_unlock(&pgdat->lru_lock);
 			spin_unlock_irqrestore(&zone->lock, flags);
 
 			// zero fill
@@ -140,10 +144,10 @@ static int zero_fill_zone_pages(struct zone *zone, int *n)
 
 			// add back to freelist
 			spin_lock_irqsave(&zone->lock, flags);
-            spin_lock(&zone->zone_pgdat->lru_lock);
+            spin_lock(&pgdat->lru_lock);
 			list_add(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
-            spin_unlock(&zone->zone_pgdat->lru_lock);
 			area->nr_free++;
+            spin_unlock(&pgdat->lru_lock);
 			spin_unlock_irqrestore(&zone->lock, flags);
 
 			// One down... (n-1) to go...
