@@ -122,11 +122,15 @@ static int zero_fill_zone_pages(struct zone *zone, int *n)
 			}
 			if (PageZeroed(page)) {
 				retries++;
+                spin_lock(&zone->zone_pgdat->lru_lock);
 				list_rotate_to_front(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
+                spin_unlock(&zone->zone_pgdat->lru_lock);
 				spin_unlock_irqrestore(&zone->lock, flags);
 				continue;
 			}
+            spin_lock(&zone->zone_pgdat->lru_lock);
 			list_del(&page->lru);
+            spin_unlock(&zone->zone_pgdat->lru_lock);
 			area->nr_free--;
 			spin_unlock_irqrestore(&zone->lock, flags);
 
@@ -136,7 +140,9 @@ static int zero_fill_zone_pages(struct zone *zone, int *n)
 
 			// add back to freelist
 			spin_lock_irqsave(&zone->lock, flags);
+            spin_lock(&zone->zone_pgdat->lru_lock);
 			list_add(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
+            spin_unlock(&zone->zone_pgdat->lru_lock);
 			area->nr_free++;
 			spin_unlock_irqrestore(&zone->lock, flags);
 
