@@ -109,21 +109,20 @@ static int zero_fill_zone_pages(struct zone *zone, int *n)
 
         for (order = HUGE_PAGE_ORDER; order < MAX_ORDER; ++order) {
 		unsigned long retries = 0;
-		area = &(zone->free_area[order]);
-
 		while (retries < 100) {
+			area = &(zone->free_area[order]);
+
 			/* remove one page from freelist with the lock held */
 			spin_lock_irqsave(&zone->lock, flags);
 			page = list_last_entry_or_null(&area->free_list[MIGRATE_MOVABLE],
 					struct page, lru);
 			if (!page) {
 				spin_unlock_irqrestore(&zone->lock, flags);
-				break;;
+				break;
 			}
 			if (PageZeroed(page)) {
 				retries++;
-				list_del(&page->lru);
-				list_add(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
+				list_rotate_to_front(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
 				spin_unlock_irqrestore(&zone->lock, flags);
 				continue;
 			}
