@@ -123,6 +123,24 @@ void register_mm_econ_tlb_miss_estimator(
 EXPORT_SYMBOL(register_mm_econ_tlb_miss_estimator);
 
 /*
+ * Find the profile of a process by PID, if any.
+ *
+ * Caller must hold `filter_procs_sem` in either read or write mode.
+ */
+static struct mmap_filter_proc *
+find_filter_proc_by_pid(pid_t pid)
+{
+    struct mmap_filter_proc *proc;
+    list_for_each_entry(proc, &filter_procs, node) {
+        if (proc->pid == pid) {
+            return proc;
+        }
+    }
+
+    return NULL;
+}
+
+/*
  * Search the profile for the range containing the given address, and return
  * it. Otherwise, return NULL.
  */
@@ -418,12 +436,8 @@ compute_hpage_benefit_from_profile(
     struct profile_range *range = NULL;
 
     down_read(&filter_procs_sem);
-    list_for_each_entry(proc, &filter_procs, node) {
-        if (proc->pid == current->tgid) {
-            range = profile_search(&proc->ranges_root, action->address);
-            break;
-        }
-    }
+    if ((proc = find_filter_proc_by_pid(current->tgid))) // NOTE: assignment
+        range = profile_search(&proc->ranges_root, action->address);
 
     if (range) {
         ret = range->misses;
@@ -791,15 +805,13 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
 
     // If this isn't the process we care about, move on
     down_read(&filter_procs_sem);
-    list_for_each_entry(proc, &filter_procs, node) {
-        if (proc->pid == pid) {
-            filter_head = &proc->filters;
-            break;
-        }
-    }
+    proc = find_filter_proc_by_pid(pid);
     up_read(&filter_procs_sem);
-    if (!filter_head)
+
+    if (!proc)
         return;
+
+    filter_head = &proc->filters;
 
     // Start with the original range of the new mapping
     range = vmalloc(sizeof(struct profile_range));
@@ -974,7 +986,6 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
 
 void mm_copy_profile(pid_t old_pid, pid_t new_pid)
 {
-    bool proc_found = false;
     struct mmap_filter_proc *proc = NULL;
     struct mmap_filter_proc *new_proc = NULL;
     struct mmap_filter *filter = NULL;
@@ -988,14 +999,9 @@ void mm_copy_profile(pid_t old_pid, pid_t new_pid)
     down_read(&filter_procs_sem);
 
     // First, find out if a profile for old_pid exists
-    list_for_each_entry(proc, &filter_procs, node) {
-        if (proc->pid == old_pid) {
-            proc_found = true;
-            break;
-        }
-    }
+    proc = find_filter_proc_by_pid(old_pid);
 
-    if (!proc_found) {
+    if (!proc) {
         up_read(&filter_procs_sem);
         return;
     }
@@ -1070,19 +1076,13 @@ err:
 
 void mm_profile_check_exiting_proc(pid_t pid)
 {
-    bool proc_found = false;
     struct mmap_filter_proc *proc;
 
     down_read(&filter_procs_sem);
-    list_for_each_entry(proc, &filter_procs, node) {
-        if (proc->pid == pid) {
-            proc_found = true;
-            break;
-        }
-    }
+    proc = find_filter_proc_by_pid(pid);
     up_read(&filter_procs_sem);
 
-    if (proc_found) {
+    if (proc) {
         down_write(&filter_procs_sem);
         // If the process exits, we should also clear its profile
         profile_free_all(&proc->ranges_root);
@@ -1244,14 +1244,11 @@ static ssize_t mmap_filters_read(struct file *file,
 
     // Find the filters that correspond to this process if there are any
     down_read(&filter_procs_sem);
-    list_for_each_entry(proc, &filter_procs, node) {
-        if (proc->pid == task->tgid) {
-            filter_head = &proc->filters;
-            break;
-        }
-    }
-    if (!filter_head)
+    proc = find_filter_proc_by_pid(task->tgid);
+    if (!proc)
         goto out;
+
+    filter_head = &proc->filters;
 
     // Print out all of the filters
     list_for_each_entry(filter, filter_head, node) {
@@ -1417,7 +1414,7 @@ static ssize_t mmap_filters_write(struct file *file,
     struct mmap_filter *filter = NULL;
     struct mmap_comparison *comparison = NULL;
     struct mmap_filter_proc *proc = NULL;
-    bool alloc_new_proc = true;
+    bool alloc_new_proc;
     ssize_t error = 0;
     int ret;
     u64 value;
@@ -1440,23 +1437,18 @@ static ssize_t mmap_filters_write(struct file *file,
         goto err;
     }
 
-    // See if an entry already exists for this process
     down_write(&filter_procs_sem);
-    list_for_each_entry(proc, &filter_procs, node) {
-        if (proc->pid == task->tgid) {
-            alloc_new_proc = false;
-            // Free the existing profile
-            profile_free_all(&proc->ranges_root);
-            mmap_filters_free_all(proc);
-            break;
-        }
-    }
-    up_write(&filter_procs_sem);
-
     // Allocate the proc structure if necessary
-    if (alloc_new_proc) {
+    if ((proc = find_filter_proc_by_pid(task->tgid))) { // NOTE: assignment
+        alloc_new_proc = false;
+        // Free the existing profile
+        profile_free_all(&proc->ranges_root);
+        mmap_filters_free_all(proc);
+    } else {
+        alloc_new_proc = true;
         proc = vmalloc(sizeof(struct mmap_filter_proc));
         if (!proc) {
+            up_write(&filter_procs_sem);
             error = -ENOMEM;
             goto err;
         }
@@ -1466,6 +1458,7 @@ static ssize_t mmap_filters_write(struct file *file,
         INIT_LIST_HEAD(&proc->filters);
         proc->ranges_root = RB_ROOT;
     }
+    up_write(&filter_procs_sem);
 
     // Read in the filters
     tok = strsep(&outerTok, "\n");
