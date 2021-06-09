@@ -733,7 +733,9 @@ void __noreturn do_exit(long code)
 #ifdef CONFIG_MM_ECON
 	// Bijan: When a process exits, check if we should stop tracking it for
 	// the memory profile
-	mm_profile_check_exiting_proc(tsk->tgid);
+	// We only care if the main thread exits, so check against tsk->pid
+	// instead of tsk->tgid
+	mm_profile_check_exiting_proc(tsk->pid);
 #endif
 
 	/* markm: doesn't seem to work properly if main thread exits not-last.
