@@ -73,6 +73,8 @@ struct mm_cost_delta {
     u64 benefit;
 };
 
+inline bool mm_process_is_using_cbmm(pid_t pid);
+
 bool mm_econ_is_on(void);
 
 bool mm_decide(const struct mm_cost_delta *cost);

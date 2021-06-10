@@ -227,8 +227,14 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 			      mm->end_data, mm->start_data))
 		goto out;
 
-	newbrk = ALIGN(brk, HPAGE_SIZE);
-	oldbrk = ALIGN(mm->brk, HPAGE_SIZE);
+	if (mm_process_is_using_cbmm(current->tgid)) {
+		newbrk = ALIGN(brk, HPAGE_SIZE);
+		oldbrk = ALIGN(mm->brk, HPAGE_SIZE);
+	} else {
+		newbrk = PAGE_ALIGN(brk);
+		oldbrk = PAGE_ALIGN(mm->brk);
+	}
+
 	if (oldbrk == newbrk) {
 		mm->brk = brk;
 		goto success;

@@ -140,6 +140,11 @@ find_filter_proc_by_pid(pid_t pid)
     return NULL;
 }
 
+inline bool mm_process_is_using_cbmm(pid_t pid)
+{
+    return find_filter_proc_by_pid(pid) != NULL;
+}
+
 /*
  * Search the profile for the range containing the given address, and return
  * it. Otherwise, return NULL.
