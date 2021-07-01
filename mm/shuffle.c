@@ -63,6 +63,8 @@ static int shuffle_trigger_store(const char *val,
 {
 	int nid;
 
+	static_branch_enable(&page_alloc_shuffle_key);
+
 	pr_warn("page_alloc: shuffling free list order=%d\n", page_alloc_shuffle_order);
 
 	for_each_node_state(nid, N_MEMORY) {
@@ -78,7 +80,7 @@ module_param_call(shuffle_trigger, shuffle_trigger_store, shuffle_show, &shuffle
  * For two pages to be swapped in the shuffle, they must be free (on a
  * 'free_area' lru), have the same order, and have the same migratetype.
  */
-static struct page * __meminit shuffle_valid_page(unsigned long pfn, int order)
+static struct page * shuffle_valid_page(unsigned long pfn, int order)
 {
 	struct page *page;
 
@@ -122,7 +124,7 @@ static struct page * __meminit shuffle_valid_page(unsigned long pfn, int order)
  * be a perfect shuffle.
  */
 #define SHUFFLE_RETRY 10
-void __meminit __shuffle_zone(struct zone *z)
+void __shuffle_zone(struct zone *z)
 {
 	unsigned long i, flags;
 	unsigned long start_pfn = z->zone_start_pfn;
@@ -197,7 +199,7 @@ void __meminit __shuffle_zone(struct zone *z)
  * shuffle_free_memory - reduce the predictability of the page allocator
  * @pgdat: node page data
  */
-void __meminit __shuffle_free_memory(pg_data_t *pgdat)
+void __shuffle_free_memory(pg_data_t *pgdat)
 {
 	struct zone *z;
 
