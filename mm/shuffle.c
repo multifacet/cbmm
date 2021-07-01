@@ -62,8 +62,13 @@ static int shuffle_trigger_store(const char *val,
 		const struct kernel_param *kp)
 {
 	int nid;
-	for_each_node_state(nid, N_MEMORY)
+
+	pr_warn("page_alloc: shuffling free list order=%d\n", page_alloc_shuffle_order);
+
+	for_each_node_state(nid, N_MEMORY) {
 		shuffle_free_memory(NODE_DATA(nid));
+		pr_warn("page_alloc: shuffled nid=%d.\n", nid);
+	}
 
 	return 0;
 }
@@ -124,6 +129,8 @@ void __meminit __shuffle_zone(struct zone *z)
 	unsigned long end_pfn = zone_end_pfn(z);
 	const int order = page_alloc_shuffle_order;
 	const int order_pages = 1 << order;
+
+	pr_warn("page_alloc: shuffling zone, start=%lu, end=%lu\n", start_pfn, end_pfn);
 
 	spin_lock_irqsave(&z->lock, flags);
 	start_pfn = ALIGN(start_pfn, order_pages);
