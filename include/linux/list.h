@@ -514,6 +514,10 @@ static inline void list_splice_tail_init(struct list_head *list,
 	pos__ != head__ ? list_entry(pos__, type, member) : NULL; \
 })
 
+#define list_last_entry_or_null(ptr, type, member) ({ \
+	list_empty(ptr) ? NULL : list_last_entry(ptr, type, member) ;\
+})
+
 /**
  * list_next_entry - get the next element in list
  * @pos:	the type * to cursor
