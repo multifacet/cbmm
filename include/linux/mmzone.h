@@ -135,10 +135,15 @@ static inline void move_to_free_area(struct page *page, struct free_area *area,
 	list_move(&page->lru, &area->free_list[migratetype]);
 }
 
+// markm: if `front`, then take from the front; otherwise, take from the tail.
 static inline struct page *get_page_from_free_area(struct free_area *area,
-					    int migratetype)
+					    int migratetype, bool front)
 {
-	return list_first_entry_or_null(&area->free_list[migratetype],
+	if (front)
+		return list_first_entry_or_null(&area->free_list[migratetype],
+					struct page, lru);
+	else
+		return list_last_entry_or_null(&area->free_list[migratetype],
 					struct page, lru);
 }
 

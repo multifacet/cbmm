@@ -11,10 +11,6 @@
 
 #define HUGE_PAGE_ORDER 9
 
-#define list_last_entry_or_null(ptr, type, member) ({ \
-	list_empty(ptr) ? NULL : list_last_entry(ptr, type, member) ;\
-})
-
 static struct task_struct *asynczero_task = NULL;
 static volatile bool asynczero_should_stop = false;
 
@@ -114,7 +110,7 @@ static int zero_fill_zone_pages(struct zone *zone, int *n)
 
 			/* remove one page from freelist with the lock held */
 			spin_lock_irqsave(&zone->lock, flags);
-			page = list_last_entry_or_null(&area->free_list[MIGRATE_MOVABLE],
+			page = list_first_entry_or_null(&area->free_list[MIGRATE_MOVABLE],
 					struct page, lru);
 			if (!page) {
 				spin_unlock_irqrestore(&zone->lock, flags);
@@ -122,7 +118,8 @@ static int zero_fill_zone_pages(struct zone *zone, int *n)
 			}
 			if (PageZeroed(page)) {
 				retries++;
-				list_rotate_to_front(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
+				// Move to tail
+				list_move_tail(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
 				spin_unlock_irqrestore(&zone->lock, flags);
 				continue;
 			}
@@ -140,7 +137,7 @@ static int zero_fill_zone_pages(struct zone *zone, int *n)
 			spin_lock_irqsave(&zone->lock, flags);
 			set_page_private(page, order);
 			__SetPageBuddy(page);
-			list_add(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
+			list_add_tail(&page->lru, &area->free_list[MIGRATE_MOVABLE]);
 			area->nr_free++;
 			spin_unlock_irqrestore(&zone->lock, flags);
 

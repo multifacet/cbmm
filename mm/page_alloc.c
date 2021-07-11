@@ -2265,7 +2265,7 @@ static void prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags
  */
 static __always_inline
 struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
-						int migratetype)
+					int migratetype, bool front)
 {
 	unsigned int current_order;
 	struct free_area *area;
@@ -2274,7 +2274,7 @@ struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
 	/* Find a page of the appropriate size in the preferred list */
 	for (current_order = order; current_order < MAX_ORDER; ++current_order) {
 		area = &(zone->free_area[current_order]);
-		page = get_page_from_free_area(area, migratetype);
+		page = get_page_from_free_area(area, migratetype, front);
 		if (!page)
 			continue;
 		del_page_from_free_area(page, area);
@@ -2307,7 +2307,7 @@ static int fallbacks[MIGRATE_TYPES][4] = {
 static __always_inline struct page *__rmqueue_cma_fallback(struct zone *zone,
 					unsigned int order)
 {
-	return __rmqueue_smallest(zone, order, MIGRATE_CMA);
+	return __rmqueue_smallest(zone, order, MIGRATE_CMA, true);
 }
 #else
 static inline struct page *__rmqueue_cma_fallback(struct zone *zone,
@@ -2651,7 +2651,7 @@ static bool unreserve_highatomic_pageblock(const struct alloc_context *ac,
 		for (order = 0; order < MAX_ORDER; order++) {
 			struct free_area *area = &(zone->free_area[order]);
 
-			page = get_page_from_free_area(area, MIGRATE_HIGHATOMIC);
+			page = get_page_from_free_area(area, MIGRATE_HIGHATOMIC, true);
 			if (!page)
 				continue;
 
@@ -2774,7 +2774,7 @@ find_smallest:
 	VM_BUG_ON(current_order == MAX_ORDER);
 
 do_steal:
-	page = get_page_from_free_area(area, fallback_mt);
+	page = get_page_from_free_area(area, fallback_mt, true);
 
 	steal_suitable_fallback(zone, page, alloc_flags, start_migratetype,
 								can_steal);
@@ -2792,12 +2792,12 @@ do_steal:
  */
 static __always_inline struct page *
 __rmqueue(struct zone *zone, unsigned int order, int migratetype,
-						unsigned int alloc_flags)
+			unsigned int alloc_flags, bool front)
 {
 	struct page *page;
 
 retry:
-	page = __rmqueue_smallest(zone, order, migratetype);
+	page = __rmqueue_smallest(zone, order, migratetype, front);
 	if (unlikely(!page)) {
 		if (migratetype == MIGRATE_MOVABLE)
 			page = __rmqueue_cma_fallback(zone, order);
@@ -2818,14 +2818,15 @@ retry:
  */
 static int rmqueue_bulk(struct zone *zone, unsigned int order,
 			unsigned long count, struct list_head *list,
-			int migratetype, unsigned int alloc_flags)
+			int migratetype, unsigned int alloc_flags,
+			bool front)
 {
 	int i, alloced = 0;
 
 	spin_lock(&zone->lock);
 	for (i = 0; i < count; ++i) {
 		struct page *page = __rmqueue(zone, order, migratetype,
-								alloc_flags);
+						alloc_flags, front);
 		if (unlikely(page == NULL))
 			break;
 
@@ -3290,7 +3291,7 @@ static inline void zone_statistics(struct zone *preferred_zone, struct zone *z)
 static struct page *__rmqueue_pcplist(struct zone *zone, int migratetype,
 			unsigned int alloc_flags,
 			struct per_cpu_pages *pcp,
-			struct list_head *list)
+			struct list_head *list, bool front)
 {
 	struct page *page;
 
@@ -3298,7 +3299,7 @@ static struct page *__rmqueue_pcplist(struct zone *zone, int migratetype,
 		if (list_empty(list)) {
 			pcp->count += rmqueue_bulk(zone, 0,
 					pcp->batch, list,
-					migratetype, alloc_flags);
+					migratetype, alloc_flags, front);
 			if (unlikely(list_empty(list)))
 				return NULL;
 		}
@@ -3314,7 +3315,8 @@ static struct page *__rmqueue_pcplist(struct zone *zone, int migratetype,
 /* Lock and remove page from the per-cpu list */
 static struct page *rmqueue_pcplist(struct zone *preferred_zone,
 			struct zone *zone, gfp_t gfp_flags,
-			int migratetype, unsigned int alloc_flags)
+			int migratetype, unsigned int alloc_flags,
+			bool front)
 {
 	struct per_cpu_pages *pcp;
 	struct list_head *list;
@@ -3324,7 +3326,7 @@ static struct page *rmqueue_pcplist(struct zone *preferred_zone,
 	local_irq_save(flags);
 	pcp = &this_cpu_ptr(zone->pageset)->pcp;
 	list = &pcp->lists[migratetype];
-	page = __rmqueue_pcplist(zone,  migratetype, alloc_flags, pcp, list);
+	page = __rmqueue_pcplist(zone,  migratetype, alloc_flags, pcp, list, front);
 	if (page) {
 		__count_zid_vm_events(PGALLOC, page_zonenum(page), 1);
 		zone_statistics(preferred_zone, zone);
@@ -3340,14 +3342,14 @@ static inline
 struct page *rmqueue(struct zone *preferred_zone,
 			struct zone *zone, unsigned int order,
 			gfp_t gfp_flags, unsigned int alloc_flags,
-			int migratetype)
+			int migratetype, bool front)
 {
 	unsigned long flags;
 	struct page *page;
 
 	if (likely(order == 0)) {
 		page = rmqueue_pcplist(preferred_zone, zone, gfp_flags,
-					migratetype, alloc_flags);
+					migratetype, alloc_flags, front);
 		goto out;
 	}
 
@@ -3361,12 +3363,12 @@ struct page *rmqueue(struct zone *preferred_zone,
 	do {
 		page = NULL;
 		if (alloc_flags & ALLOC_HARDER) {
-			page = __rmqueue_smallest(zone, order, MIGRATE_HIGHATOMIC);
+			page = __rmqueue_smallest(zone, order, MIGRATE_HIGHATOMIC, true);
 			if (page)
 				trace_mm_page_alloc_zone_locked(page, order, migratetype);
 		}
 		if (!page)
-			page = __rmqueue(zone, order, migratetype, alloc_flags);
+			page = __rmqueue(zone, order, migratetype, alloc_flags, front);
 	} while (page && check_new_pages(page, order));
 	spin_unlock(&zone->lock);
 	if (!page)
@@ -3660,6 +3662,11 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 	struct pglist_data *last_pgdat_dirty_limit = NULL;
 	bool no_fallback;
 
+	// markm: if the user requested a zeroed page of order > 0, we try
+	// removing a page from the back of the freelist, as that is where the
+	// prezeroed pages are likely to be.
+	bool try_back = (order > 0) && (gfp_mask & __GFP_ZERO);
+
 retry:
 	/*
 	 * Scan zonelist, looking for a zone with enough free.
@@ -3767,7 +3774,7 @@ retry:
 
 try_this_zone:
 		page = rmqueue(ac->preferred_zoneref->zone, zone, order,
-				gfp_mask, alloc_flags, ac->migratetype);
+				gfp_mask, alloc_flags, ac->migratetype, !try_back);
 		if (page) {
 			prep_new_page(page, order, gfp_mask, alloc_flags);
 
