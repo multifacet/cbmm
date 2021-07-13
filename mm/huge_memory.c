@@ -1181,9 +1181,9 @@ static inline gfp_t alloc_hugepage_direct_gfpmask(
 		// perhaps if value of THP is high but cost of direct reclaim
 		// is too high.
 		if (should_do) {
-			return GFP_TRANSHUGE_LIGHT | __GFP_DIRECT_RECLAIM;
+			return GFP_TRANSHUGE_LIGHT | __GFP_DEADLINE | __GFP_DIRECT_RECLAIM;
 		} else {
-			return GFP_TRANSHUGE_LIGHT;
+			return GFP_TRANSHUGE_LIGHT | __GFP_DEADLINE;
 		}
 	}
 

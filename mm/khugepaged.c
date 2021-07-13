@@ -713,7 +713,8 @@ static bool khugepaged_scan_abort(int nid)
 /* Defrag for khugepaged will enter direct reclaim/compaction if necessary */
 static inline gfp_t alloc_hugepage_khugepaged_gfpmask(void)
 {
-	return khugepaged_defrag() ? GFP_TRANSHUGE : GFP_TRANSHUGE_LIGHT;
+	return (khugepaged_defrag() ? GFP_TRANSHUGE : GFP_TRANSHUGE_LIGHT)
+		| (mm_econ_is_on() ? __GFP_DEADLINE : 0);
 }
 
 #ifdef CONFIG_NUMA

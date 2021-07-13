@@ -2265,7 +2265,8 @@ static void prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags
  */
 static __always_inline
 struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
-					int migratetype, bool front)
+					int migratetype, bool front,
+					bool only_prezeroed)
 {
 	unsigned int current_order;
 	struct free_area *area;
@@ -2276,6 +2277,8 @@ struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
 		area = &(zone->free_area[current_order]);
 		page = get_page_from_free_area(area, migratetype, front);
 		if (!page)
+			continue;
+		if (only_prezeroed && !(page->flags & PG_zeroed))
 			continue;
 		del_page_from_free_area(page, area);
 		expand(zone, page, order, current_order, area, migratetype);
@@ -2307,7 +2310,7 @@ static int fallbacks[MIGRATE_TYPES][4] = {
 static __always_inline struct page *__rmqueue_cma_fallback(struct zone *zone,
 					unsigned int order)
 {
-	return __rmqueue_smallest(zone, order, MIGRATE_CMA, true);
+	return __rmqueue_smallest(zone, order, MIGRATE_CMA, true, false);
 }
 #else
 static inline struct page *__rmqueue_cma_fallback(struct zone *zone,
@@ -2795,9 +2798,10 @@ __rmqueue(struct zone *zone, unsigned int order, int migratetype,
 			unsigned int alloc_flags, bool front)
 {
 	struct page *page;
+	bool only_prezeroed = !!(alloc_flags & ALLOC_DEADLINE);
 
 retry:
-	page = __rmqueue_smallest(zone, order, migratetype, front);
+	page = __rmqueue_smallest(zone, order, migratetype, front, only_prezeroed);
 	if (unlikely(!page)) {
 		if (migratetype == MIGRATE_MOVABLE)
 			page = __rmqueue_cma_fallback(zone, order);
@@ -3363,7 +3367,7 @@ struct page *rmqueue(struct zone *preferred_zone,
 	do {
 		page = NULL;
 		if (alloc_flags & ALLOC_HARDER) {
-			page = __rmqueue_smallest(zone, order, MIGRATE_HIGHATOMIC, true);
+			page = __rmqueue_smallest(zone, order, MIGRATE_HIGHATOMIC, true, false);
 			if (page)
 				trace_mm_page_alloc_zone_locked(page, order, migratetype);
 		}
@@ -4850,6 +4854,12 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	 * memory until all local zones are considered.
 	 */
 	alloc_flags |= alloc_flags_nofragment(ac.preferred_zoneref->zone, gfp_mask);
+
+	// markm: if we have a deadline and we request a zeroed page, add an
+	// appropriate alloc flag...
+	if ((gfp_mask & (__GFP_DEADLINE | __GFP_ZERO)) == (__GFP_DEADLINE | __GFP_ZERO)) {
+		alloc_flags |= ALLOC_DEADLINE;
+	}
 
 	/* First allocation attempt */
 	page = get_page_from_freelist(alloc_mask, order, alloc_flags, &ac);
