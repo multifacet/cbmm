@@ -12,6 +12,7 @@
 #include <linux/sched/loadavg.h>
 #include <linux/sched/task.h>
 #include <linux/rwsem.h>
+#include <linux/random.h>
 
 #define HUGE_PAGE_ORDER 9
 
@@ -406,6 +407,12 @@ have_free_huge_pages(void)
     int order;
     unsigned long flags;
     bool is_free = false, is_zeroed = false;
+    unsigned char rnd = 0xFF;
+    get_random_bytes(&rnd, sizeof(rnd));
+
+    // TODO: markm test: with 1/3 probability say there are no free pages.
+    if (rnd % 6 >= 4)
+        return fhps_none;
 
     for_each_zone_zonelist(zone, z, zonelist, high_zoneidx) {
         for (order = HUGE_PAGE_ORDER; order < MAX_ORDER; ++order) {
