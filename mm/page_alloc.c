@@ -3350,6 +3350,7 @@ struct page *rmqueue(struct zone *preferred_zone,
 {
 	unsigned long flags;
 	struct page *page;
+	bool only_prezeroed = !!(alloc_flags & ALLOC_DEADLINE);
 
 	if (likely(order == 0)) {
 		page = rmqueue_pcplist(preferred_zone, zone, gfp_flags,
@@ -3367,7 +3368,7 @@ struct page *rmqueue(struct zone *preferred_zone,
 	do {
 		page = NULL;
 		if (alloc_flags & ALLOC_HARDER) {
-			page = __rmqueue_smallest(zone, order, MIGRATE_HIGHATOMIC, true, false);
+			page = __rmqueue_smallest(zone, order, MIGRATE_HIGHATOMIC, front, only_prezeroed);
 			if (page)
 				trace_mm_page_alloc_zone_locked(page, order, migratetype);
 		}
