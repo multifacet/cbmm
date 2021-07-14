@@ -142,6 +142,7 @@ enum mm_stats_pf_flags {
 
 	// Used for debugging...
 	MM_STATS_PF_NEW,
+	MM_STATS_PF_NEW2,
 
 	// NOTE: must be the last value in the enum... not actually a flag.
 	MM_STATS_NUM_FLAGS,

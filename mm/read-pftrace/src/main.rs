@@ -157,6 +157,7 @@ with_stringify! {
         ALLOC_NODE_RECLAIM,
 
         NEW,
+        NEW2,
 
         OTHER, // A hack -- shouldn't actually be in use...
         MM_STATS_NUM_FLAGS,
