@@ -4866,6 +4866,12 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	if (likely(page))
 		goto out;
 
+	// markm: if we failed and have a deadline, fail fast.
+	if ((gfp_mask & (__GFP_DEADLINE | __GFP_ZERO)) == (__GFP_DEADLINE | __GFP_ZERO)) {
+		BUG_ON(gfp_mask & __GFP_NOFAIL);
+		return NULL;
+	}
+
 	get_cpu_var(pftrace_alloc_fallback) = true;
 
 	/*
