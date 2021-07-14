@@ -4050,10 +4050,8 @@ static inline vm_fault_t create_huge_pmd(struct vm_fault *vmf,
 {
 	if (vma_is_anonymous(vmf->vma))
 		return do_huge_pmd_anonymous_page(vmf, pftrace);
-	if (vmf->vma->vm_ops->huge_fault) {
-		mm_stats_set_flag(pftrace, MM_STATS_PF_NEW2);
+	if (vmf->vma->vm_ops->huge_fault)
 		return vmf->vma->vm_ops->huge_fault(vmf, PE_SIZE_PMD);
-	}
 	return VM_FAULT_FALLBACK;
 }
 
