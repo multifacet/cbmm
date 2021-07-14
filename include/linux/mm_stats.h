@@ -140,6 +140,9 @@ enum mm_stats_pf_flags {
 	// fast path ("node reclaim"), as opposed to direct reclaim.
 	MM_STATS_PF_ALLOC_NODE_RECLAIM,
 
+	// Used for debugging...
+	MM_STATS_PF_NEW,
+
 	// NOTE: must be the last value in the enum... not actually a flag.
 	MM_STATS_NUM_FLAGS,
 };

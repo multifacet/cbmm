@@ -343,6 +343,7 @@ char *mm_stats_pf_flags_names[MM_STATS_NUM_FLAGS] = {
 	[MM_STATS_PF_ALLOC_FALLBACK] = "MM_STATS_PF_ALLOC_FALLBACK",
         [MM_STATS_PF_ALLOC_PREZEROED] = "MM_STATS_PF_ALLOC_PREZEROED",
         [MM_STATS_PF_ALLOC_NODE_RECLAIM] = "MM_STATS_PF_ALLOC_NODE_RECLAIM",
+        [MM_STATS_PF_NEW] = "MM_STATS_PF_NEW",
 };
 
 // This is the pftrace file, found at "/pftrace". We also keep track of the

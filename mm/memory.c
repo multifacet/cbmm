@@ -4608,8 +4608,10 @@ retry_pud:
 
 		if (should_do) {
 			ret = create_huge_pmd(&vmf, pftrace);
-			if (!(ret & VM_FAULT_FALLBACK))
+			if (!(ret & VM_FAULT_FALLBACK)) {
+				mm_stats_set_flag(pftrace, MM_STATS_PF_NEW);
 				return ret;
+			}
 		}
 	} else {
 		// (markm) Entry is already present.
