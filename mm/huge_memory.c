@@ -1296,7 +1296,8 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 		return ret;
 	}
 	pftrace->alloc_start_tsc = rdtsc();
-	gfp = alloc_hugepage_direct_gfpmask(vma, haddr);
+	gfp = alloc_hugepage_direct_gfpmask(vma, haddr)
+		| (mm_econ_is_on() ? __GFP_ZERO : 0);
 	page = alloc_hugepage_vma(gfp, vma, haddr, HPAGE_PMD_ORDER);
 	pftrace->alloc_end_tsc = rdtsc();
 	mm_stats_check_alloc_fallback(pftrace);
