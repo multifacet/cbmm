@@ -4560,6 +4560,12 @@ retry_cpuset:
 	if (page)
 		goto got_pg;
 
+	// markm: if we failed and have a deadline, fail fast.
+	if ((gfp_mask & (__GFP_DEADLINE | __GFP_ZERO)) == (__GFP_DEADLINE | __GFP_ZERO)) {
+		BUG_ON(gfp_mask & __GFP_NOFAIL);
+		return NULL;
+	}
+
 	/*
 	 * For costly allocations, try direct compaction first, as it's likely
 	 * that we have enough base pages and don't need to reclaim. For non-
@@ -4865,12 +4871,6 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	page = get_page_from_freelist(alloc_mask, order, alloc_flags, &ac);
 	if (likely(page))
 		goto out;
-
-	// markm: if we failed and have a deadline, fail fast.
-	if ((gfp_mask & (__GFP_DEADLINE | __GFP_ZERO)) == (__GFP_DEADLINE | __GFP_ZERO)) {
-		BUG_ON(gfp_mask & __GFP_NOFAIL);
-		return NULL;
-	}
 
 	get_cpu_var(pftrace_alloc_fallback) = true;
 
