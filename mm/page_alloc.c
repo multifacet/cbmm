@@ -3787,8 +3787,9 @@ try_this_zone:
 			 * If this is a high-order atomic allocation then check
 			 * if the pageblock should be reserved for the future
 			 */
-			if (unlikely(order && (alloc_flags & ALLOC_HARDER)))
-				reserve_highatomic_pageblock(page, zone, order);
+			//TODO: markm: testing -- don't keep this commented!
+			//if (unlikely(order && (alloc_flags & ALLOC_HARDER)))
+			//	reserve_highatomic_pageblock(page, zone, order);
 
 			return page;
 		} else {
