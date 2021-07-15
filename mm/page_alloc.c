@@ -4538,6 +4538,11 @@ retry_cpuset:
 	 * alloc_flags precisely. So we do that now.
 	 */
 	alloc_flags = gfp_to_alloc_flags(gfp_mask);
+	// markm: if we have a deadline and we request a zeroed page, add an
+	// appropriate alloc flag...
+	if ((gfp_mask & (__GFP_DEADLINE | __GFP_ZERO)) == (__GFP_DEADLINE | __GFP_ZERO)) {
+		alloc_flags |= ALLOC_DEADLINE;
+	}
 
 	/*
 	 * We need to recalculate the starting point for the zonelist iterator
