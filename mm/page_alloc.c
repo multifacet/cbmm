@@ -3787,9 +3787,8 @@ try_this_zone:
 			 * If this is a high-order atomic allocation then check
 			 * if the pageblock should be reserved for the future
 			 */
-			//TODO: markm: testing -- don't keep this commented!
-			//if (unlikely(order && (alloc_flags & ALLOC_HARDER)))
-			//	reserve_highatomic_pageblock(page, zone, order);
+			if (unlikely(order && (alloc_flags & ALLOC_HARDER)))
+				reserve_highatomic_pageblock(page, zone, order);
 
 			return page;
 		} else {
@@ -4541,9 +4540,9 @@ retry_cpuset:
 	alloc_flags = gfp_to_alloc_flags(gfp_mask);
 	// markm: if we have a deadline and we request a zeroed page, add an
 	// appropriate alloc flag...
-	//if ((gfp_mask & (__GFP_DEADLINE | __GFP_ZERO)) == (__GFP_DEADLINE | __GFP_ZERO)) {
-	//	alloc_flags |= ALLOC_DEADLINE;
-	//}
+	if ((gfp_mask & (__GFP_DEADLINE | __GFP_ZERO)) == (__GFP_DEADLINE | __GFP_ZERO)) {
+		alloc_flags |= ALLOC_DEADLINE;
+	}
 
 	/*
 	 * We need to recalculate the starting point for the zonelist iterator
@@ -4568,7 +4567,7 @@ retry_cpuset:
 		goto got_pg;
 
 	// markm: if we failed and have a deadline, fail fast.
-	if ((gfp_mask & (__GFP_DEADLINE | __GFP_ZERO)) == (__GFP_DEADLINE | __GFP_ZERO)) {
+	if (alloc_flags & ALLOC_DEADLINE) {
 		BUG_ON(gfp_mask & __GFP_NOFAIL);
 		return NULL;
 	}
