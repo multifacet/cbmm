@@ -13,7 +13,8 @@
 struct mm_stats_pftrace;
 
 extern vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf,
-					     struct mm_stats_pftrace *pftrace);
+					     struct mm_stats_pftrace *pftrace,
+					     bool require_prezeroed);
 extern int copy_huge_pmd(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 			 pmd_t *dst_pmd, pmd_t *src_pmd, unsigned long addr,
 			 struct vm_area_struct *vma);

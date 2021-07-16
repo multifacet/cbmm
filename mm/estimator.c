@@ -488,6 +488,8 @@ mm_estimate_huge_page_promote_cost_benefit(
 
     // Compute total cost.
     cost->cost = alloc_cost + prep_cost;
+    cost->extra = fhps == fhps_zeroed;
+
 
 #define TLB_MISS_COST 50 //cycles
 
