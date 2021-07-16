@@ -1234,7 +1234,8 @@ static bool set_huge_zero_page(pgtable_t pgtable, struct mm_struct *mm,
 }
 
 vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf,
-				      struct mm_stats_pftrace *pftrace)
+				      struct mm_stats_pftrace *pftrace,
+				      bool require_prezeroed)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	gfp_t gfp;
@@ -1300,6 +1301,22 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 	mm_stats_check_alloc_fallback(pftrace);
 	mm_stats_check_alloc_zeroing(pftrace);
 	if (unlikely(!page)) {
+		mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_ALLOC_FAILED);
+		count_vm_event(THP_FAULT_FALLBACK);
+		return VM_FAULT_FALLBACK;
+	} else if (mm_econ_is_on() && require_prezeroed && !PageZeroed(page)) {
+		// HACK (markm): If the estimator assumed that a prezeroed page
+		// would be availabe, make sure that we don't use an unzeroed
+		// page. The correct way to do this would be to fix the way we
+		// estimate if a prezeroed page is available or to fix the page
+		// allocator to be more predictable. However, after some time
+		// trying, the existing allocator is a bit convoluted and we
+		// have a deadline, so....
+
+		// Free the page to avoid a leak.
+		__free_pages(page, HPAGE_PMD_ORDER);
+
+		// Act like a failure.
 		mm_stats_set_flag(pftrace, MM_STATS_PF_HUGE_ALLOC_FAILED);
 		count_vm_event(THP_FAULT_FALLBACK);
 		return VM_FAULT_FALLBACK;

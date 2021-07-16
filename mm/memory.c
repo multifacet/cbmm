@@ -4046,10 +4046,11 @@ out:
 }
 
 static inline vm_fault_t create_huge_pmd(struct vm_fault *vmf,
-					 struct mm_stats_pftrace *pftrace)
+					 struct mm_stats_pftrace *pftrace,
+					 bool require_prezeroed)
 {
 	if (vma_is_anonymous(vmf->vma))
-		return do_huge_pmd_anonymous_page(vmf, pftrace);
+		return do_huge_pmd_anonymous_page(vmf, pftrace, require_prezeroed);
 	if (vmf->vma->vm_ops->huge_fault)
 		return vmf->vma->vm_ops->huge_fault(vmf, PE_SIZE_PMD);
 	return VM_FAULT_FALLBACK;
@@ -4607,7 +4608,7 @@ retry_pud:
 		should_do = mm_decide(&mm_cost_delta);
 
 		if (should_do) {
-			ret = create_huge_pmd(&vmf, pftrace);
+			ret = create_huge_pmd(&vmf, pftrace, mm_cost_delta.extra);
 			if (!(ret & VM_FAULT_FALLBACK))
 				return ret;
 		}

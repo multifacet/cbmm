@@ -71,6 +71,11 @@ struct mm_cost_delta {
 
     // Total estimated benefit in cycles.
     u64 benefit;
+
+    // HACK: extra info about assumptions the estimator made. This isn't
+    // fundamentally needed, but it is the fastest way to avoid races between
+    // the estimator and the execution of policies.
+    int extra;
 };
 
 inline bool mm_process_is_using_cbmm(pid_t pid);
