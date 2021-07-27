@@ -848,7 +848,7 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                 break;
 
             // Determine the value to use for this comparison
-            if (comp->quant == QuantSectionOff) {
+            if (comp->quant == QuantSectionOff || comp->quant == QuantAddr) {
                 // This type of filter comparison is the most complex because
                 // it may cause the region to be split one or more times.
                 // This happens when the new region overlaps with multiple filters.
@@ -864,12 +864,16 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                 // carefully.
 
                 // Find the range to do the comparison on
-                // This step basically involves converting the section offset
+                // If the comparator is Addr, this is straight forward.
+                // Otherwise, this step basically involves converting the section offset
                 // given in the filter to a virtual address corresponding to
                 // that offset. We need to do this because the memory ranges
                 // we are operating on are virtual addresses.
                 // We need to account for the mmap section growing down
-                if (section == SectionMmap) {
+                if (comp->quant == QuantAddr) {
+                    search_key = comp->val;
+                    comparator = comp->comp;
+                } else if (section == SectionMmap) {
                     section_base = mapaddr + section_off;
                     search_key = section_base - comp->val;
 
@@ -937,8 +941,6 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
 
                 continue;
             }
-            else if (comp->quant == QuantAddr)
-                val = addr;
             else if (comp->quant == QuantLen)
                 val = len;
             else if (comp->quant == QuantProt)
