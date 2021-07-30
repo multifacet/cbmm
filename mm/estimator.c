@@ -1425,6 +1425,8 @@ static ssize_t mmap_filters_write(struct file *file,
     struct mmap_filter_proc *proc = NULL;
     bool alloc_new_proc;
     ssize_t error = 0;
+    size_t bytes_read = 0;
+    size_t filter_len = 0;
     int ret;
     u64 value;
     char * value_buf;
@@ -1450,9 +1452,6 @@ static ssize_t mmap_filters_write(struct file *file,
     // Allocate the proc structure if necessary
     if ((proc = find_filter_proc_by_pid(task->tgid))) { // NOTE: assignment
         alloc_new_proc = false;
-        // Free the existing profile
-        profile_free_all(&proc->ranges_root);
-        mmap_filters_free_all(proc);
     } else {
         alloc_new_proc = true;
         proc = vmalloc(sizeof(struct mmap_filter_proc));
@@ -1472,9 +1471,14 @@ static ssize_t mmap_filters_write(struct file *file,
     // Read in the filters
     tok = strsep(&outerTok, "\n");
     while (outerTok) {
+        bool invalid_filter = false;
+
         if (tok[0] == '\0') {
             break;
         }
+
+        // Include the \n that was removed by strsep
+        filter_len = strlen(tok) + 1;
 
         filter = vmalloc(sizeof(struct mmap_filter));
         if (!filter) {
@@ -1485,22 +1489,19 @@ static ssize_t mmap_filters_write(struct file *file,
         // Get the section of the memory map
         value_buf = strsep(&tok, ",");
         if (!value_buf) {
-            error = -EINVAL;
-            goto err;
+            break;
         }
         ret = get_memory_section(value_buf, &filter->section);
 
         // Get the misses for the filter
         value_buf = strsep(&tok, ",");
         if (!value_buf) {
-            error = -EINVAL;
-            goto err;
+            break;
         }
 
         ret = kstrtoull(value_buf, 0, &value);
         if (ret != 0) {
-            error = -EINVAL;
-            goto err;
+            break;
         }
 
         filter->misses = value;
@@ -1520,14 +1521,17 @@ static ssize_t mmap_filters_write(struct file *file,
 
             ret = mmap_filter_read_comparison(&tok, comparison);
             if (ret != 0) {
-                error = -EINVAL;
+                invalid_filter = true;
                 vfree (comparison);
-                goto err;
+                break;
             }
 
             // Add the comparison to the list of comparisons
             list_add_tail(&comparison->node, &filter->comparisons);
         }
+
+        if (invalid_filter)
+            break;
 
         // Add the new filter to the list
         down_write(&filter_procs_sem);
@@ -1536,6 +1540,19 @@ static ssize_t mmap_filters_write(struct file *file,
 
         // Get the next filter
         tok = strsep(&outerTok, "\n");
+
+        bytes_read += filter_len;
+    }
+
+    // The write system call might not write the entire filter file in one go.
+    // We most handle the case where the file is seperated in the middle of a
+    // filter, making it look invalid.
+    // If that happens, we simply say we read up until the last full filter.
+    // However, if we read no good filters before the first invalid filter,
+    // just assume the filter is bad.
+    if (bytes_read == 0) {
+        error = -EINVAL;
+        goto err;
     }
 
     // Link the new proc if we need to
@@ -1548,7 +1565,7 @@ static ssize_t mmap_filters_write(struct file *file,
     vfree(buf_from_user);
     put_task_struct(task);
 
-    return count;
+    return bytes_read;
 
 err:
     if (filter)
