@@ -4885,7 +4885,7 @@ out:
 
 	// markm: update if we allocated a zeroed large allocation.
 	// For now, we mostly care about huge pages.
-	if (page && (gfp_mask & __GFP_ZERO) && (order >= 9)) {
+	if (page && (gfp_mask & GFP_TRANSHUGE_LIGHT) && (order >= 9)) {
 		lfpa_update(rdtsc());
 	}
 
