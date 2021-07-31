@@ -26,6 +26,11 @@
 // - 1: on (cost-benefit estimation)
 static int mm_econ_mode = 0;
 
+// Number of cycles per unit time page allocator zone lock is NOT held.
+// In this case, the unit time is 10ms because that is the granularity async
+// zero daemon uses.
+static u64 mm_econ_contention_cycles = 2600000;
+
 // The Preloaded Profile, if any.
 struct profile_range {
     u64 start;
@@ -590,6 +595,26 @@ void mm_estimate_async_prezeroing_benefit(
     cost->benefit = min(action->prezero_n, recent_used) * zeroing_per_page_cost;
 }
 
+// Estimate the cost of lock contention due to prezeroing.
+//
+// During the LTU, we can grab the lock at times when it would otherwise be
+// idle for free. If we assume that the critical section of the async
+// prezeroing is about 150 cycles (to acquire/release and add/remove from
+// linked list), then we get the number of times per LTU we can do prezeroing
+// for free.
+//
+// We can then discount action->prezero_n operations by the number of free
+// items and expense the rest at the cost of the critical section.
+void mm_estimate_async_prezeroing_lock_contention_cost(
+       const struct mm_action *action, struct mm_cost_delta *cost)
+{
+    const u64 critical_section_cost = 150 * 2; // cycles
+    const u64 nfree = mm_econ_contention_cycles / critical_section_cost;
+
+    cost->cost += (action->prezero_n > nfree ? action->prezero_n - nfree  : 0)
+                    * critical_section_cost;
+}
+
 bool mm_econ_is_on(void)
 {
     return mm_econ_mode > 0;
@@ -635,6 +660,7 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
 
         case MM_ACTION_RUN_PREZEROING:
             mm_estimate_daemon_cost(action, cost);
+            mm_estimate_async_prezeroing_lock_contention_cost(action, cost);
             mm_estimate_async_prezeroing_benefit(action, cost);
             if (cost->cost < cost->benefit)
                 mm_econ_num_async_prezeroing += 1;
@@ -1138,6 +1164,32 @@ static ssize_t enabled_store(struct kobject *kobj,
 static struct kobj_attribute enabled_attr =
 __ATTR(enabled, 0644, enabled_show, enabled_store);
 
+static ssize_t contention_cycles_show(struct kobject *kobj,
+        struct kobj_attribute *attr, char *buf)
+{
+    return sprintf(buf, "%llu\n", mm_econ_contention_cycles);
+}
+
+static ssize_t contention_cycles_store(struct kobject *kobj,
+        struct kobj_attribute *attr,
+        const char *buf, size_t count)
+{
+    u64 cycles;
+    int ret;
+
+    ret = kstrtou64(buf, 0, &cycles);
+
+    if (ret != 0) {
+        return ret;
+    }
+    else {
+        mm_econ_contention_cycles = cycles;
+        return count;
+    }
+}
+static struct kobj_attribute contention_cycles_attr =
+__ATTR(contention_cyles, 0644, contention_cycles_show, contention_cycles_store);
+
 static ssize_t stats_show(struct kobject *kobj,
         struct kobj_attribute *attr, char *buf)
 {
@@ -1164,6 +1216,7 @@ __ATTR(stats, 0444, stats_show, stats_store);
 
 static struct attribute *mm_econ_attr[] = {
     &enabled_attr.attr,
+    &contention_cycles_attr.attr,
     &stats_attr.attr,
     NULL,
 };
