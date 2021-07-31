@@ -30,6 +30,10 @@ struct Config {
     #[structopt(long, conflicts_with("percentile"))]
     pdf: bool,
 
+    /// Output the combined CDF/PDF
+    #[structopt(long)]
+    combined: bool,
+
     /// Which data to output.
     #[structopt(
         long,
@@ -282,8 +286,14 @@ fn categorize(
             DataMode::PrepTotal => trace.prep_end_tsc - trace.prep_start_tsc,
         };
 
+        let bitflags = if config.combined {
+            MMStatsBitflags(0)
+        } else {
+            trace.bitflags
+        };
+
         categorized
-            .entry(trace.bitflags)
+            .entry(bitflags)
             .or_insert(Histogram::new(5).unwrap())
             .record(data)
             .unwrap();
@@ -292,8 +302,14 @@ fn categorize(
     // Adjust for the rejected samples.
     if let Some((rejected, threshold)) = rejected {
         for (bitflags, rejected_count) in rejected {
+            let flags = if config.combined {
+                MMStatsBitflags(0)
+            } else {
+                *bitflags
+            };
+
             categorized
-                .entry(*bitflags)
+                .entry(flags)
                 .or_insert(Histogram::new(5).unwrap())
                 .record_n(*threshold, *rejected_count)
                 .unwrap();
