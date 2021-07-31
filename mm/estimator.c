@@ -415,7 +415,7 @@ have_free_huge_pages(void)
             if (is_free) {
                 spin_lock_irqsave(&zone->lock, flags);
 
-                page = list_first_entry_or_null(
+                page = list_last_entry_or_null(
                         &area->free_list[MIGRATE_MOVABLE], struct page,
                         lru);
                 is_zeroed = page && PageZeroed(page);
