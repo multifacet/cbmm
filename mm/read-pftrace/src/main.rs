@@ -61,7 +61,7 @@ struct Config {
 
     /// Instead of printing a distribution, print the given percentile for each of set of bitflags.
     #[structopt(long)]
-    percentile: Option<usize>,
+    percentile: Option<f64>,
 }
 
 arg_enum! {
@@ -398,7 +398,7 @@ fn generate_percentiles(
     excluded_bitmask: MMStatsBitflags,
 ) -> () {
     let categorized = categorize(config, buf, rejected, excluded_bitmask);
-    let p = config.percentile.unwrap() as f64 / 100.0;
+    let p = config.percentile.unwrap() / 100.0;
 
     let mut keys = categorized.keys().collect::<Vec<_>>();
     keys.sort_by_key(|flags| categorized.get(flags).unwrap().len());
