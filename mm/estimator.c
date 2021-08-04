@@ -430,7 +430,6 @@ have_free_huge_pages(void)
 
                 spin_unlock_irqrestore(&zone->lock, flags);
 
-                break;
                 if (mm_econ_debugging_mode == 1) {
                     pr_warn("estimator: found "
                             "free page %p node %d zone %p (%s) "
@@ -439,10 +438,13 @@ have_free_huge_pages(void)
                             zone, zone->name, order,
                             is_zeroed, MIGRATE_MOVABLE);
                 }
+
+                goto exit;
             }
         }
     }
 
+exit:
     return is_zeroed ? fhps_zeroed :
         is_free ? fhps_free :
         fhps_none;
