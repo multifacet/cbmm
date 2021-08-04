@@ -3387,6 +3387,15 @@ out:
 		wakeup_kswapd(zone, 0, 0, zone_idx(zone));
 	}
 
+	if (order >= 9 && mm_econ_debugging_mode) {
+		pr_warn("alloc_pages: page %p node %d "
+			"zone %p (%s) order %d "
+			"migratetype %d front %d\n",
+			page, zone->zone_pgdat->node_id,
+			zone, zone->name, order,
+			migratetype, front);
+	}
+
 	VM_BUG_ON_PAGE(page && bad_range(zone, page), page);
 	return page;
 

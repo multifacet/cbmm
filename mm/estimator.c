@@ -26,6 +26,9 @@
 // - 1: on (cost-benefit estimation)
 static int mm_econ_mode = 0;
 
+// Turns on various debugging printks...
+int mm_econ_debugging_mode = 0;
+
 // Number of cycles per unit time page allocator zone lock is NOT held.
 // In this case, the unit time is 10ms because that is the granularity async
 // zero daemon uses.
@@ -428,6 +431,14 @@ have_free_huge_pages(void)
                 spin_unlock_irqrestore(&zone->lock, flags);
 
                 break;
+                if (mm_econ_debugging_mode == 1) {
+                    pr_warn("estimator: found "
+                            "free page %p node %d zone %p (%s) "
+                            "order %d prezeroed %d list %d",
+                            page, zone->zone_pgdat->node_id,
+                            zone, zone->name, order,
+                            is_zeroed, MIGRATE_MOVABLE);
+                }
             }
         }
     }
@@ -688,6 +699,11 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
     mm_econ_num_estimates += 1;
     mm_stats_hist_measure(&mm_econ_cost, cost->cost);
     mm_stats_hist_measure(&mm_econ_benefit, cost->benefit);
+
+    if (mm_econ_debugging_mode == 2) {
+        pr_warn("estimator: action=%d cost=%llu benefit=%llu",
+                action->action, cost->cost, cost->benefit);
+    }
 }
 EXPORT_SYMBOL(mm_estimate_changes);
 
@@ -1164,6 +1180,33 @@ static ssize_t enabled_store(struct kobject *kobj,
 static struct kobj_attribute enabled_attr =
 __ATTR(enabled, 0644, enabled_show, enabled_store);
 
+static ssize_t debugging_mode_show(struct kobject *kobj,
+        struct kobj_attribute *attr, char *buf)
+{
+    return sprintf(buf, "%d\n", mm_econ_debugging_mode);
+}
+
+static ssize_t debugging_mode_store(struct kobject *kobj,
+        struct kobj_attribute *attr,
+        const char *buf, size_t count)
+{
+    int mode;
+    int ret;
+
+    ret = kstrtoint(buf, 0, &mode);
+
+    if (ret != 0) {
+        mm_econ_debugging_mode = 0;
+        return ret;
+    }
+    else {
+        mm_econ_debugging_mode = mode;
+        return count;
+    }
+}
+static struct kobj_attribute debugging_mode_attr =
+__ATTR(debugging_mode, 0644, debugging_mode_show, debugging_mode_store);
+
 static ssize_t contention_cycles_show(struct kobject *kobj,
         struct kobj_attribute *attr, char *buf)
 {
@@ -1218,6 +1261,7 @@ static struct attribute *mm_econ_attr[] = {
     &enabled_attr.attr,
     &contention_cycles_attr.attr,
     &stats_attr.attr,
+    &debugging_mode_attr.attr,
     NULL,
 };
 

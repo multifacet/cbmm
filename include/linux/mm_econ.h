@@ -97,4 +97,6 @@ void mm_copy_profile(pid_t old_pid, pid_t new_pid);
 void mm_profile_check_exiting_proc(pid_t pid);
 
 u64 mm_estimated_prezeroed_used(void);
+
+extern int mm_econ_debugging_mode;
 #endif

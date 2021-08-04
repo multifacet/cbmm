@@ -1313,6 +1313,10 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 		// trying, the existing allocator is a bit convoluted and we
 		// have a deadline, so....
 
+		if (mm_econ_debugging_mode == 3) {
+			pr_warn("estimator: conflict page %p", page);
+		}
+
 		// Free the page to avoid a leak.
 		__free_pages(page, HPAGE_PMD_ORDER);
 
