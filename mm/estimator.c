@@ -404,18 +404,18 @@ enum free_huge_page_status {
 static enum free_huge_page_status
 have_free_huge_pages(void)
 {
+    int zone_idx;
     struct zone *zone;
     struct page *page;
     struct free_area *area;
-    struct zoneref *z;
-    gfp_t gfp = GFP_TRANSHUGE_LIGHT;
-    enum zone_type high_zoneidx = gfp_zone(gfp);
-    struct zonelist *zonelist = node_zonelist(numa_node_id(), gfp);
+    bool is_free = false, is_zeroed = false;
     int order;
     unsigned long flags;
-    bool is_free = false, is_zeroed = false;
 
-    for_each_zone_zonelist(zone, z, zonelist, high_zoneidx) {
+    pg_data_t *pgdat = NODE_DATA(numa_node_id());
+    for (zone_idx = ZONE_NORMAL; zone_idx < MAX_NR_ZONES; zone_idx++) {
+        zone = &pgdat->node_zones[zone_idx];
+
         for (order = HUGE_PAGE_ORDER; order < MAX_ORDER; ++order) {
             area = &(zone->free_area[order]);
             is_free = area->nr_free > 0;
