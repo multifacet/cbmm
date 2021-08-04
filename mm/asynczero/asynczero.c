@@ -233,7 +233,7 @@ static int asynczero_do_work(void *data)
 
 		// If worth it, zero some pages.
 		if (should_run) zero_n_pages(count);
-		else msleep(10); // 10ms... short, allows fine-grained decisions
+		msleep(10); // 10ms... short, allows fine-grained decisions
 
 		// Yield CPU.
 		if (mm_econ_is_on() && mode == 0)
