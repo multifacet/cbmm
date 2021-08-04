@@ -34,7 +34,9 @@ module_param(pages_zeroed, ullong, 0444);
 
 static inline bool skip_zone(struct zone *zone)
 {
-	return false;
+	// Skip the zone if it is ZONE_DMA or ZONE_DMA32
+	enum zone_type zt = zone_idx(zone);
+	return zt == ZONE_DMA || zt == ZONE_DMA32;
 }
 
 /*
