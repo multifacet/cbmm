@@ -3665,7 +3665,7 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 	// markm: if the user requested a zeroed page of order > 0, we try
 	// removing a page from the back of the freelist, as that is where the
 	// prezeroed pages are likely to be.
-	bool try_back = (order > 0) && (gfp_mask & __GFP_ZERO);
+	bool try_back = order >= HPAGE_PMD_ORDER;
 
 retry:
 	/*
