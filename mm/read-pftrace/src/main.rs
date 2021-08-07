@@ -30,9 +30,15 @@ struct Config {
     #[structopt(long, conflicts_with("percentile"))]
     pdf: bool,
 
-    /// Output the combined CDF/PDF
-    #[structopt(long)]
+    /// Output the combined CDF/PDF.
+    #[structopt(long, conflicts_with("percentile"))]
     combined: bool,
+
+    /// Output tail latency based on the given maximum number of 9's. That is, given a value of 5,
+    /// we output 100 points, with exponentially more density as we go from 0 to 99.999 (i.e., 5
+    /// 9's).
+    #[structopt(long, conflicts_with("percentile"), conflicts_with("pdf"))]
+    tail: Option<usize>,
 
     /// Which data to output.
     #[structopt(
@@ -414,6 +420,42 @@ fn generate_percentiles(
     println!();
 }
 
+/// Generate a list of 100 percentiles to compute. If we are doing a tail latency plot, we want to
+/// exponentially be more dense at the tail. Otherwise, we just use uniform density.
+fn get_points(config: &Config) -> Box<dyn Iterator<Item = f64>> {
+    if let Some(nines) = config.tail {
+        let nines = nines as f64;
+        // If we are going from 0 to `nines` 9's, then the nth "step" is determined by this
+        // function: `p = 100 - 10^(2-n)`. For example:
+        //
+        //       n     p
+        //       0     0
+        //       1     90
+        //       2     99
+        //       3     99.9
+        //       4     99.99
+        //       5     99.999
+        //      ...    ...
+        // `nines`     99.9...9  <- `nines` 9's
+        //
+        // We want to find 100 points in this function, with denser points closer to the tail. To
+        // do this, we will first generate 100 linearly spaced points from 0 to `nines`
+        // (inclusive). Then, we will map them with the above function.
+        Box::new(
+            (0..=100)
+                .map(|n| n as f64)
+                // scale down to `[0, nines]`
+                .map(move |n| n * nines / 100.)
+                // map into log space
+                .map(|n| 100. - 10f64.powf(2. - n))
+                // scale down to `[0, 1)` (i.e., not a percent anymore)
+                .map(|p| p / 100.),
+        )
+    } else {
+        Box::new((0..=100).map(|p| p as f64).map(|p| p / 100.))
+    }
+}
+
 fn generate_cdfs(
     config: &Config,
     buf: &[MMStatsPftrace],
@@ -435,7 +477,7 @@ fn generate_cdfs(
     for flags in keys.iter() {
         let hist = categorized.get(flags).unwrap();
         print!(" {}({})", flags.name(), hist.len());
-        for v in (0..=100).map(|p| hist.value_at_quantile((p as f64) / 100.)) {
+        for v in get_points(&config).map(|p| hist.value_at_quantile(p)) {
             print!(" {}", v);
         }
     }
