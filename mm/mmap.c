@@ -282,6 +282,20 @@ success:
 	userfaultfd_unmap_complete(mm, &uf);
 	if (populate)
 		mm_populate(oldbrk, newbrk - oldbrk);
+	else if (mm_econ_is_on()) {
+		struct mm_cost_delta mm_cost_delta;
+		struct mm_action mm_action;
+		bool should_do;
+
+		mm_action.address = oldbrk;
+		mm_action.action = MM_ACTION_EAGER_PAGING;
+		mm_estimate_changes(&mm_action, &mm_cost_delta);
+		should_do = mm_decide(&mm_cost_delta);
+
+		if (should_do) {
+			mm_populate(oldbrk, newbrk - oldbrk);
+		}
+	}
 	return brk;
 
 out:
@@ -1385,20 +1399,6 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 
 	//down_read(&mm->badger_trap_page_table_sem);
 
-	// markm: use eager paging if the cost benefit analysis supports it.
-	struct mm_cost_delta mm_cost_delta;
-	struct mm_action mm_action;
-	bool should_do;
-
-	mm_action.address = addr;
-	mm_action.action = MM_ACTION_EAGER_PAGING;
-	mm_estimate_changes(&mm_action, &mm_cost_delta);
-	should_do = mm_decide(&mm_cost_delta);
-
-	if (should_do && mm_econ_is_on()) {
-		flags |= MAP_POPULATE;
-	}
-
 	*populate = 0;
 
 	if (!len) {
@@ -1667,10 +1667,26 @@ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 	retval = vm_mmap_pgoff(file, addr, len, prot, flags, pgoff);
 #ifdef CONFIG_MM_ECON
 	if (!IS_ERR((void*)retval)) {
+		struct mm_cost_delta mm_cost_delta;
+		struct mm_action mm_action;
+		bool should_do;
 		// Bijan: Potentially add this mmap to the tracked process's profile
 		u64 section_off = current->mm->mmap_base - retval;
 		mm_add_memory_range(current->tgid, SectionMmap, retval, section_off,
 				addr, len, prot, flags, fd, pgoff);
+
+		// Determine if we want to eagerly allocate parts of this mmap
+		if ( (flags & MAP_ANONYMOUS) && mm_econ_is_on()) {
+			mm_action.address = retval;
+			mm_action.action = MM_ACTION_EAGER_PAGING;
+			mm_estimate_changes(&mm_action, &mm_cost_delta);
+			should_do = mm_decide(&mm_cost_delta);
+
+			if (should_do) {
+				mm_populate(retval, len);
+			}
+		}
+
 	}
 #endif
 out_fput:
