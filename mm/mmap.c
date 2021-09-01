@@ -282,7 +282,7 @@ success:
 	userfaultfd_unmap_complete(mm, &uf);
 	if (populate)
 		mm_populate(oldbrk, newbrk - oldbrk);
-	else if (mm_econ_is_on()) {
+	else if (mm_econ_is_on() && mm_process_is_using_cbmm(current->tgid)) {
 		struct mm_cost_delta mm_cost_delta;
 		struct mm_action mm_action;
 		bool should_do;
@@ -1676,7 +1676,8 @@ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 				addr, len, prot, flags, fd, pgoff);
 
 		// Determine if we want to eagerly allocate parts of this mmap
-		if ( (flags & MAP_ANONYMOUS) && mm_econ_is_on()) {
+		if ( (flags & MAP_ANONYMOUS) && mm_econ_is_on() && mm_process_is_using_cbmm(current->tgid)) {
+            printk("hello there\n");
 			mm_action.address = retval;
 			mm_action.action = MM_ACTION_EAGER_PAGING;
 			mm_estimate_changes(&mm_action, &mm_cost_delta);
