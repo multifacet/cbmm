@@ -4601,6 +4601,8 @@ retry_pud:
 		// (markm) No entry present.
 
 		// (markm) run the estimator to check if we should create a 2MB page.
+        if (mm_process_is_using_cbmm(current->tgid))
+            printk("address: %llx\n", address);
 		mm_action.address = address;
 		mm_action.action = MM_ACTION_PROMOTE_HUGE;
 		mm_action.huge_page_order = HPAGE_PMD_ORDER;

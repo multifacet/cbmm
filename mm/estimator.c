@@ -38,10 +38,16 @@ static u64 mm_econ_contention_cycles = 2600000;
 struct profile_range {
     u64 start;
     u64 end;
-    // This should already be in units of misses/huge-page/LTU.
-    u64 misses;
+    // The benefit depends on what the profile is measuring
+    u64 benefit;
 
     struct rb_node node;
+};
+
+// The policy the filter applies to
+enum mm_policy {
+    PolicyHugePage,
+    PolicyEagerPage
 };
 
 // The operator to use when deciding if quantity from an mmap matches
@@ -76,7 +82,8 @@ struct mmap_comparison {
 struct mmap_filter {
     struct list_head node;
     enum mm_memory_section section;
-    u64 misses;
+    enum mm_policy policy;
+    u64 benefit;
     struct list_head comparisons;
 };
 
@@ -85,7 +92,8 @@ struct mmap_filter_proc {
     struct list_head node;
     pid_t pid;
     struct list_head filters;
-    struct rb_root ranges_root;
+    struct rb_root hp_ranges_root;
+    struct rb_root eager_ranges_root;
 };
 
 // List of processes using mmap filters
@@ -460,14 +468,14 @@ compute_hpage_benefit_from_profile(
 
     down_read(&filter_procs_sem);
     if ((proc = find_filter_proc_by_pid(current->tgid))) // NOTE: assignment
-        range = profile_search(&proc->ranges_root, action->address);
+        range = profile_search(&proc->hp_ranges_root, action->address);
 
     if (range) {
-        ret = range->misses;
+        ret = range->benefit;
 
         //pr_warn("mm_econ: estimating page benefit: "
         //        "misses=%llu size=%llu per-page=%llu\n",
-        //        range->misses,
+        //        range->benefit,
         //        (range->end - range->start) >> HPAGE_SHIFT,
         //        ret);
     }
@@ -483,6 +491,86 @@ compute_hpage_benefit(const struct mm_action *action)
         return tlb_miss_est_fn(action);
     else
         return compute_hpage_benefit_from_profile(action);
+}
+
+static void
+compute_eager_page_benefit(const struct mm_action *action, struct mm_cost_delta *cost)
+{
+    u64 benefit = 0;
+    u64 start, end;
+    int range_count = 0;
+    struct mmap_filter_proc *proc;
+    struct profile_range *first_range = NULL;
+    struct profile_range *range = NULL;
+    struct rb_node *node = NULL;
+    struct range *ranges = NULL;
+
+    start = action->address;
+    end = action->address + action->len;
+
+    down_read(&filter_procs_sem);
+    // First find the first range with an address g.t. the given address
+    if ((proc = find_filter_proc_by_pid(current->tgid))) { // NOTE: assignment
+        first_range = profile_find_first_range(&proc->eager_ranges_root,
+            start, CompGreaterThan);
+    }
+    if (!first_range)
+        goto out;
+
+    node = &first_range->node;
+
+    // Count up all the ranges that have greater benefit than cost so we
+    // know how big of an array to allocate later
+    while (node) {
+        range = container_of(node, struct profile_range, node);
+
+        if (start >= range->end || end <= range->start)
+            break;
+
+        if (range->benefit > cost->cost)
+            range_count++;
+
+        node = rb_next(node);
+    }
+
+    if (range_count == 0)
+        goto out;
+
+    // +1 for the ending signal
+    ranges = vmalloc(sizeof(struct range) * (range_count + 1));
+    if (!ranges)
+        goto out;
+
+    // Fill in the list of ranges to page in
+    range_count = 0;
+    node = &first_range->node;
+    while (node) {
+        range = container_of(node, struct profile_range, node);
+
+        if (start >= range->end || end <= range->start)
+            break;
+
+        if (range->benefit > cost->cost) {
+            ranges[range_count].start = range->start;
+            ranges[range_count].end = range->end;
+
+            if (range->benefit > benefit)
+                benefit = range->benefit;
+
+            range_count++;
+        }
+
+        node = rb_next(node);
+    }
+    // Hacky: Just use -1 in the start and end to signal the end of the list
+    ranges[range_count].start = ranges[range_count].end = -1;
+
+    // Pass the list of ranges to promote to the decider in the extra field
+    cost->extra = (u64)ranges;
+out:
+    up_read(&filter_procs_sem);
+
+    cost->benefit = benefit;
 }
 
 // Estimate cost/benefit of a huge page promotion for the current process.
@@ -628,6 +716,20 @@ void mm_estimate_async_prezeroing_lock_contention_cost(
                     * critical_section_cost;
 }
 
+// Estimate the cost of eagerly allocating a page
+void mm_estimate_eager_page_cost_benefit(
+        const struct mm_action *action, struct mm_cost_delta *cost)
+{
+    // Based on our measurements of page fault latency, almost all of the base page
+    // faults take less than 10us, so convert that to cycles and use that for the
+    // cost.
+    // We do not have to consider the cost of faulting in a huge page, since that
+    // will be handled by the huge page cost/benefit logic
+    cost->cost = 26000;
+    // Populates cost->benefit and cost->extra
+    compute_eager_page_benefit(action, cost);
+}
+
 bool mm_econ_is_on(void)
 {
     return mm_econ_mode > 0;
@@ -687,9 +789,7 @@ mm_estimate_changes(const struct mm_action *action, struct mm_cost_delta *cost)
             break;
 
         case MM_ACTION_EAGER_PAGING:
-            // TODO(markm)
-            cost->cost = 0;
-            cost->benefit = 0;
+            mm_estimate_eager_page_cost_benefit(action, cost);
             break;
 
         default:
@@ -772,7 +872,7 @@ static bool mm_split_ranges(struct profile_range *base_range, struct rb_root *su
         if (!split_range)
             return false;
 
-        split_range->misses = 0;
+        split_range->benefit = 0;
         split_range->start = base_range->start;
         split_range->end = addr;
         base_range->start = addr;
@@ -787,7 +887,7 @@ static bool mm_split_ranges(struct profile_range *base_range, struct rb_root *su
         if (!split_range)
             return false;
 
-        split_range->misses = 0;
+        split_range->benefit = 0;
         split_range->start = addr;
         split_range->end = base_range->end;
         base_range->end = addr;
@@ -800,7 +900,7 @@ static bool mm_split_ranges(struct profile_range *base_range, struct rb_root *su
             if (!split_range)
                 return false;
 
-            split_range->misses = 0;
+            split_range->benefit = 0;
             split_range->start = base_range->start;
             split_range->end = addr;
             base_range->start = addr;
@@ -813,7 +913,7 @@ static bool mm_split_ranges(struct profile_range *base_range, struct rb_root *su
             if (!split_range)
                 return false;
 
-            split_range->misses = 0;
+            split_range->benefit = 0;
             split_range->start = addr + PAGE_SIZE;
             split_range->end = base_range->end;
             base_range->end = addr + PAGE_SIZE;
@@ -823,6 +923,32 @@ static bool mm_split_ranges(struct profile_range *base_range, struct rb_root *su
     }
 
     return true;
+}
+
+static int mm_copy_profile_range(
+        struct rb_root* old_root, struct rb_root* new_root)
+{
+    struct rb_node *node = NULL;
+    struct profile_range *range = NULL;
+    struct profile_range *new_range = NULL;
+
+    node = rb_first(old_root);
+    while (node) {
+        new_range = vmalloc(sizeof(struct profile_range));
+        if (!new_range)
+            return -1;
+
+        range = container_of(node, struct profile_range, node);
+        new_range->start = range->start;
+        new_range->end = range->end;
+        new_range->benefit = range->benefit;
+
+        profile_range_insert(new_root, new_range);
+
+        node = rb_next(node);
+    }
+
+    return 0;
 }
 
 // Search mmap_filters for a filter that matches this new memory map
@@ -848,8 +974,9 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
     struct profile_range *range = NULL;
     struct list_head *filter_head = NULL;
     // Used to keep track of the subranges of the new memory range that are
-    // from splitting a range due to a section_off constraint.
-    struct rb_root subranges = RB_ROOT;
+    // from splitting a range due to a addr or section_off constraint.
+    struct rb_root huge_subranges = RB_ROOT;
+    struct rb_root eager_subranges = RB_ROOT;
     struct rb_node *range_node = NULL;
     bool passes_filter;
     u64 val;
@@ -867,23 +994,37 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
     // Start with the original range of the new mapping
     range = vmalloc(sizeof(struct profile_range));
     if (!range) {
-        pr_warn("mm_add_mmap: no memory for new range");
+        pr_warn("mm_add_memory_range: no memory for new range");
         return;
     }
     // Align the range bounds to a page
     range->start = mapaddr & PAGE_MASK;
     range->end = (mapaddr + len + PAGE_SIZE - 1) & PAGE_MASK;
-    range->misses = 0;
-    profile_range_insert(&subranges, range);
+    range->benefit = 0;
+    profile_range_insert(&huge_subranges, range);
+
+    if (mm_copy_profile_range(&huge_subranges, &eager_subranges) != 0) {
+        pr_warn("mm_add_memory_range: no memory for new range");
+        return;
+    }
 
     // Check if this mmap matches any of our filters
     down_read(&filter_procs_sem);
     list_for_each_entry(filter, filter_head, node) {
+        // Each filter only applies to either the eager or huge page policy
+        // This variable points to the applicable subranges tree
+        struct rb_root *subranges = NULL;
         // We need a second rb_tree because we don't want to change the
         // subranges tree unless we are sure a filter matches
         struct rb_root temp_subranges = RB_ROOT;
         // The range in the subranges tree that we are splitting
         struct profile_range *parent_range = NULL;
+
+        if (filter->policy == PolicyHugePage) {
+            subranges = &huge_subranges;
+        } else if (filter->policy == PolicyEagerPage) {
+            subranges = &eager_subranges;
+        }
 
         passes_filter = section == filter->section;
 
@@ -936,7 +1077,7 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                 if (!parent_range) {
                     // Find the range to potentially split, and add it to
                     // temp_subranges
-                    parent_range = profile_find_first_range(&subranges, search_key, comparator);
+                    parent_range = profile_find_first_range(subranges, search_key, comparator);
                     if (!parent_range) {
                         passes_filter = false;
                         break;
@@ -944,22 +1085,19 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
 
                     // If the found range has already matched with a filter, we
                     // are done
-                    if (parent_range->misses != 0) {
+                    if (parent_range->benefit != 0) {
                         passes_filter = false;
                         break;
                     }
 
                     range = vmalloc(sizeof(struct profile_range));
                     if (!range) {
-                        pr_warn("mm_add_mmap: no memory for new range");
-                        profile_free_all(&subranges);
                         profile_free_all(&temp_subranges);
-                        up_read(&filter_procs_sem);
-                        return;
+                        goto err;
                     }
                     range->start = parent_range->start;
                     range->end = parent_range->end;
-                    range->misses = parent_range->misses;
+                    range->benefit = parent_range->benefit;
 
                     profile_range_insert(&temp_subranges, range);
                 } else {
@@ -971,16 +1109,13 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                     }
                 }
 
-                // Assign the misses value.
-                range->misses = filter->misses;
+                // Assign the benefit value.
+                range->benefit = filter->benefit;
 
                 // Split the range if necessary
                 if (!mm_split_ranges(range, &temp_subranges, search_key, comparator)) {
-                    pr_warn("mm_add_mmap: no memory for new range");
-                    profile_free_all(&subranges);
                     profile_free_all(&temp_subranges);
-                    up_read(&filter_procs_sem);
-                    return;
+                    goto err;
                 }
 
                 continue;
@@ -1003,21 +1138,21 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
         // from the subranges tree, and add the new ones
         if (passes_filter && parent_range) {
             range_node = &parent_range->node;
-            rb_erase(range_node, &subranges);
+            rb_erase(range_node, subranges);
             vfree(parent_range);
 
-            profile_move(&temp_subranges, &subranges);
+            profile_move(&temp_subranges, subranges);
         }
-        // If the entire new range matches this filter, set the misses
+        // If the entire new range matches this filter, set the benefit
         // value for all of the subranges that have not been set yet
         else if(passes_filter) {
-            range_node = rb_first(&subranges);
+            range_node = rb_first(subranges);
 
             while (range_node) {
                 range = container_of(range_node, struct profile_range, node);
 
-                if (range->misses == 0)
-                    range->misses = filter->misses;
+                if (range->benefit == 0)
+                    range->benefit = filter->benefit;
 
                 range_node = rb_next(range_node);
             }
@@ -1031,10 +1166,17 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
 
     // Finally, insert all of the new ranges into the proc's tree
     down_write(&filter_procs_sem);
-    profile_move(&subranges, &proc->ranges_root);
+    profile_move(&huge_subranges, &proc->hp_ranges_root);
+    profile_move(&eager_subranges, &proc->eager_ranges_root);
     up_write(&filter_procs_sem);
+    return;
 
-    //printk("Added range %d %llx %llx %lld %llx\n", section, range->start, range->end, range->misses, len);
+err:
+    pr_warn("mm_add_memory_range: no memory for new range");
+    profile_free_all(&huge_subranges);
+    profile_free_all(&eager_subranges);
+    up_read(&filter_procs_sem);
+    //printk("Added range %d %llx %llx %lld %llx\n", section, range->start, range->end, range->benefit, len);
 }
 
 void mm_copy_profile(pid_t old_pid, pid_t new_pid)
@@ -1045,9 +1187,6 @@ void mm_copy_profile(pid_t old_pid, pid_t new_pid)
     struct mmap_filter *new_filter = NULL;
     struct mmap_comparison *comparison = NULL;
     struct mmap_comparison *new_comparison = NULL;
-    struct profile_range *range = NULL;
-    struct profile_range *new_range = NULL;
-    struct rb_node *node = NULL;
 
     down_read(&filter_procs_sem);
 
@@ -1064,7 +1203,8 @@ void mm_copy_profile(pid_t old_pid, pid_t new_pid)
         goto err;
     new_proc->pid = new_pid;
     INIT_LIST_HEAD(&new_proc->filters);
-    new_proc->ranges_root = RB_ROOT;
+    new_proc->hp_ranges_root = RB_ROOT;
+    new_proc->eager_ranges_root = RB_ROOT;
 
     // First, copy the filters
     list_for_each_entry(filter, &proc->filters, node) {
@@ -1073,7 +1213,7 @@ void mm_copy_profile(pid_t old_pid, pid_t new_pid)
             goto err;
 
         new_filter->section = filter->section;
-        new_filter->misses = filter->misses;
+        new_filter->benefit = filter->benefit;
         INIT_LIST_HEAD(&new_filter->comparisons);
 
         list_add_tail(&new_filter->node, &new_proc->filters);
@@ -1092,21 +1232,10 @@ void mm_copy_profile(pid_t old_pid, pid_t new_pid)
     }
 
     // Now, copy the ranges
-    node = rb_first(&proc->ranges_root);
-    while (node) {
-        new_range = vmalloc(sizeof(struct profile_range));
-        if (!new_range)
-            goto err;
-
-        range = container_of(node, struct profile_range, node);
-        new_range->start = range->start;
-        new_range->end = range->end;
-        new_range->misses = range->misses;
-
-        profile_range_insert(&new_proc->ranges_root, new_range);
-
-        node = rb_next(node);
-    }
+    if (mm_copy_profile_range(&proc->hp_ranges_root, &new_proc->hp_ranges_root) != 0)
+        goto err;
+    if (mm_copy_profile_range(&proc->eager_ranges_root, &new_proc->eager_ranges_root) != 0)
+        goto err;
 
     up_read(&filter_procs_sem);
 
@@ -1121,7 +1250,8 @@ err:
 
     pr_warn("mm_econ: Unable to copy profile from %d to %d", old_pid, new_pid);
     if (new_proc) {
-        profile_free_all(&new_proc->ranges_root);
+        profile_free_all(&new_proc->hp_ranges_root);
+        profile_free_all(&new_proc->eager_ranges_root);
         mmap_filters_free_all(new_proc);
         vfree(new_proc);
     }
@@ -1138,7 +1268,8 @@ void mm_profile_check_exiting_proc(pid_t pid)
     if (proc) {
         down_write(&filter_procs_sem);
         // If the process exits, we should also clear its profile
-        profile_free_all(&proc->ranges_root);
+        profile_free_all(&proc->hp_ranges_root);
+        profile_free_all(&proc->eager_ranges_root);
         mmap_filters_free_all(proc);
 
         // Remove the node from the list
@@ -1290,6 +1421,18 @@ static void mm_memory_section_get_str(char *buf, enum mm_memory_section section)
     }
 }
 
+static void mm_policy_get_str(char *buf, enum mm_policy policy)
+{
+    if (policy == PolicyHugePage) {
+        strcpy(buf, "huge");
+    } else if (policy == PolicyEagerPage) {
+        strcpy(buf, "eager");
+    } else {
+        pr_warn("Invalid mm policy");
+        BUG();
+    }
+}
+
 static char mmap_comparator_get_char(enum mmap_comparator comp)
 {
     if (comp == CompEquals) {
@@ -1348,7 +1491,7 @@ static ssize_t mmap_filters_read(struct file *file,
     }
 
     // First, print the CSV Header for easier reading
-    len = sprintf(buffer, "SECTION,MISSES,CONSTRAINTS...\n");
+    len = sprintf(buffer, "POLICY,SECTION,MISSES,CONSTRAINTS...\n");
 
     // Find the filters that correspond to this process if there are any
     down_read(&filter_procs_sem);
@@ -1360,12 +1503,14 @@ static ssize_t mmap_filters_read(struct file *file,
 
     // Print out all of the filters
     list_for_each_entry(filter, filter_head, node) {
+        char policy[8];
         char section[8];
         char quantity[16];
-        u64 misses = filter->misses;
+        u64 benefit = filter->benefit;
         char comparator;
         u64 val;
 
+        mm_policy_get_str(policy, filter->policy);
         mm_memory_section_get_str(section, filter->section);
 
         // Make sure we don't overflow the buffer
@@ -1373,7 +1518,7 @@ static ssize_t mmap_filters_read(struct file *file,
             goto out;
 
         // Print the per filter information
-        len += sprintf(&buffer[len], "%s,0x%llx", section, misses);
+        len += sprintf(&buffer[len], "%s,%s,0x%llx", policy, section, benefit);
 
         list_for_each_entry(comparison, &filter->comparisons, node) {
             mmap_quantity_get_str(quantity, comparison->quant);
@@ -1418,6 +1563,21 @@ static int get_memory_section(char *buf, enum mm_memory_section *section)
         *section = SectionHeap;
     } else if (strcmp(buf, "mmap") == 0) {
         *section = SectionMmap;
+    } else {
+        ret = -1;
+    }
+
+    return ret;
+}
+
+static int get_mm_policy(char *buf, enum mm_policy *policy)
+{
+    int ret = 0;
+
+    if (strcmp(buf, "huge") == 0) {
+        *policy = PolicyHugePage;
+    } else if (strcmp(buf, "eager") == 0) {
+        *policy = PolicyEagerPage;
     } else {
         ret = -1;
     }
@@ -1563,7 +1723,7 @@ static ssize_t mmap_filters_write(struct file *file,
         // Initialize the new proc
         proc->pid = task->tgid;
         INIT_LIST_HEAD(&proc->filters);
-        proc->ranges_root = RB_ROOT;
+        proc->hp_ranges_root = RB_ROOT;
     }
     up_write(&filter_procs_sem);
 
@@ -1585,14 +1745,27 @@ static ssize_t mmap_filters_write(struct file *file,
             goto err;
         }
 
+        // Get the policy the filter applies to
+        value_buf = strsep(&tok, ",");
+        if (!value_buf) {
+            break;
+        }
+        ret = get_mm_policy(value_buf, &filter->policy);
+        if (ret != 0) {
+            break;
+        }
+
         // Get the section of the memory map
         value_buf = strsep(&tok, ",");
         if (!value_buf) {
             break;
         }
         ret = get_memory_section(value_buf, &filter->section);
+        if (ret != 0) {
+            break;
+        }
 
-        // Get the misses for the filter
+        // Get the benefit for the filter
         value_buf = strsep(&tok, ",");
         if (!value_buf) {
             break;
@@ -1603,7 +1776,7 @@ static ssize_t mmap_filters_write(struct file *file,
             break;
         }
 
-        filter->misses = value;
+        filter->benefit = value;
 
         // Read in the comparisons of the filter
         INIT_LIST_HEAD(&filter->comparisons);
@@ -1689,6 +1862,33 @@ const struct file_operations proc_mmap_filters_operations = {
     .llseek = default_llseek,
 };
 
+static ssize_t print_range_tree(char *buffer, ssize_t buf_size, struct rb_node *node)
+{
+    ssize_t len = 0;
+
+    while (node) {
+        struct profile_range *range =
+            container_of(node, struct profile_range, node);
+
+        // Make sure we don't overflow the buffer
+        if (len > buf_size - MMAP_FILTER_BUF_DEAD_ZONE)
+            return len;
+
+        len += sprintf(
+            &buffer[len],
+            "[0x%llx, 0x%llx) (%llu bytes) benefit=0x%llx\n",
+            range->start,
+            range->end,
+            range->end - range->start,
+            range->benefit
+        );
+
+        node = rb_next(node);
+    }
+
+    return len;
+}
+
 static ssize_t print_profile(struct file *file,
         char __user *buf, size_t count, loff_t *ppos)
 {
@@ -1698,6 +1898,7 @@ static ssize_t print_profile(struct file *file,
     ssize_t ret = 0;
     struct mmap_filter_proc *proc;
     struct rb_node *node = NULL;
+    bool found = false;
 
     if (!task)
         return -ESRCH;
@@ -1706,12 +1907,12 @@ static ssize_t print_profile(struct file *file,
     down_read(&filter_procs_sem);
     list_for_each_entry(proc, &filter_procs, node) {
         if (proc->pid == task->tgid) {
-            node = rb_first(&proc->ranges_root);
+            found = true;
             break;
         }
     }
     up_read(&filter_procs_sem);
-    if (!node) {
+    if (!found) {
         put_task_struct(task);
         return 0;
     }
@@ -1723,27 +1924,14 @@ static ssize_t print_profile(struct file *file,
     }
 
     down_read(&filter_procs_sem);
-    while (node) {
-        struct profile_range *range =
-            container_of(node, struct profile_range, node);
+    len += sprintf(buffer, "Huge Page Ranges:\n");
+    node = rb_first(&proc->hp_ranges_root);
+    len += print_range_tree(&buffer[len], MMAP_FILTER_BUF_SIZE - len, node);
 
-        // Make sure we don't overflow the buffer
-        if (len > MMAP_FILTER_BUF_SIZE - MMAP_FILTER_BUF_DEAD_ZONE)
-            goto out;
+    len += sprintf(&buffer[len], "Eager Page Ranges:\n");
+    node = rb_first(&proc->eager_ranges_root);
+    len += print_range_tree(&buffer[len], MMAP_FILTER_BUF_SIZE - len, node);
 
-        len += sprintf(
-            &buffer[len],
-            "[0x%llx, 0x%llx) (%llu bytes) misses=0x%llx\n",
-            range->start,
-            range->end,
-            range->end - range->start,
-            range->misses
-        );
-
-        node = rb_next(node);
-    }
-
-out:
     up_read(&filter_procs_sem);
 
     ret = simple_read_from_buffer(buf, count, ppos, buffer, len);

@@ -282,18 +282,27 @@ success:
 	userfaultfd_unmap_complete(mm, &uf);
 	if (populate)
 		mm_populate(oldbrk, newbrk - oldbrk);
-	else if (mm_econ_is_on() && mm_process_is_using_cbmm(current->tgid)) {
+	else if (newbrk > oldbrk && mm_econ_is_on() && mm_process_is_using_cbmm(current->tgid)) {
 		struct mm_cost_delta mm_cost_delta;
 		struct mm_action mm_action;
+		struct range *ranges = NULL;
+		int i = 0;
 		bool should_do;
 
 		mm_action.address = oldbrk;
+		mm_action.len = newbrk - oldbrk;
 		mm_action.action = MM_ACTION_EAGER_PAGING;
 		mm_estimate_changes(&mm_action, &mm_cost_delta);
 		should_do = mm_decide(&mm_cost_delta);
 
+		printk("%lx address %lx should_do %x", newbrk, oldbrk, should_do);
 		if (should_do) {
-			mm_populate(oldbrk, newbrk - oldbrk);
+			ranges = (struct range*)mm_cost_delta.extra;
+			while(ranges[i].start != -1 && ranges[i].end != -1) {
+				mm_populate(ranges[i].start, ranges[i].end - ranges[i].start);
+				i++;
+			}
+			vfree(ranges);
 		}
 	}
 	return brk;
@@ -1669,6 +1678,8 @@ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 	if (!IS_ERR((void*)retval)) {
 		struct mm_cost_delta mm_cost_delta;
 		struct mm_action mm_action;
+		struct range *ranges = NULL;
+		int i = 0;
 		bool should_do;
 		// Bijan: Potentially add this mmap to the tracked process's profile
 		u64 section_off = current->mm->mmap_base - retval;
@@ -1677,14 +1688,19 @@ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 
 		// Determine if we want to eagerly allocate parts of this mmap
 		if ( (flags & MAP_ANONYMOUS) && mm_econ_is_on() && mm_process_is_using_cbmm(current->tgid)) {
-            printk("hello there\n");
 			mm_action.address = retval;
+			mm_action.len = len;
 			mm_action.action = MM_ACTION_EAGER_PAGING;
 			mm_estimate_changes(&mm_action, &mm_cost_delta);
 			should_do = mm_decide(&mm_cost_delta);
 
 			if (should_do) {
-				mm_populate(retval, len);
+				ranges = (struct range*)mm_cost_delta.extra;
+				while(ranges[i].start != -1 && ranges[i].end != -1) {
+					mm_populate(ranges[i].start, ranges[i].end - ranges[i].start);
+					i++;
+				}
+				vfree(ranges);
 			}
 		}
 

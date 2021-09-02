@@ -3,6 +3,7 @@
 
 #include <linux/fs.h>
 #include <linux/types.h>
+#include <linux/range.h>
 
 // Various possible actions, to be used with `struct mm_action`.
 #define MM_ACTION_NONE                 0
@@ -37,6 +38,9 @@ struct mm_action {
 
         // How many pages are prezeroed?
         u64 prezero_n;
+
+        // What is the length of a memory region
+        u64 len;
     };
 };
 
@@ -75,7 +79,7 @@ struct mm_cost_delta {
     // HACK: extra info about assumptions the estimator made. This isn't
     // fundamentally needed, but it is the fastest way to avoid races between
     // the estimator and the execution of policies.
-    int extra;
+    u64 extra;
 };
 
 inline bool mm_process_is_using_cbmm(pid_t pid);
