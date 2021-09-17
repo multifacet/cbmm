@@ -21,7 +21,9 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Globals...
 
-int unique_virt_addrs = 0;
+// When set to 1, processes using CBMM will not reuse virtual addresses
+// when mapping anonymous memory.
+int unique_virt_addrs = 1;
 
 // Modes:
 // - 0: off (just use default linux behavior)
