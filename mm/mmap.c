@@ -295,7 +295,6 @@ success:
 		mm_estimate_changes(&mm_action, &mm_cost_delta);
 		should_do = mm_decide(&mm_cost_delta);
 
-		printk("%lx address %lx should_do %x", newbrk, oldbrk, should_do);
 		if (should_do) {
 			ranges = (struct range*)mm_cost_delta.extra;
 			while(ranges[i].start != -1 && ranges[i].end != -1) {
