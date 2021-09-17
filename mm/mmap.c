@@ -2814,6 +2814,7 @@ int split_vma(struct mm_struct *mm, struct vm_area_struct *vma,
 	return __split_vma(mm, vma, addr, new_below);
 }
 
+extern int unique_virt_addrs;
 /* Munmap is split into 2 main parts -- this part which finds
  * what needs doing, and the areas themselves, which do the
  * work.  This now handles partial unmappings.
@@ -2915,15 +2916,20 @@ int __do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
 	}
 
 	/* Detach vmas from rbtree */
-	detach_vmas_to_be_unmapped(mm, vma, prev, end);
+    if (!unique_virt_addrs || !mm_process_is_using_cbmm(current->tgid) || vma->vm_file)
+	    detach_vmas_to_be_unmapped(mm, vma, prev, end);
 
 	if (downgrade)
 		downgrade_write(&mm->mmap_sem);
 
-	unmap_region(mm, vma, prev, start, end);
+    if (!unique_virt_addrs || !mm_process_is_using_cbmm(current->tgid) || vma->vm_file) {
+	    unmap_region(mm, vma, prev, start, end);
 
 	/* Fix up all other VM information */
-	remove_vma_list(mm, vma);
+	    remove_vma_list(mm, vma);
+    } else {
+        zap_page_range(vma, start, len);
+    }
 
 	return downgrade ? 1 : 0;
 }

@@ -21,6 +21,8 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Globals...
 
+int unique_virt_addrs = 0;
+
 // Modes:
 // - 0: off (just use default linux behavior)
 // - 1: on (cost-benefit estimation)
@@ -1390,11 +1392,39 @@ static ssize_t stats_store(struct kobject *kobj,
 static struct kobj_attribute stats_attr =
 __ATTR(stats, 0444, stats_show, stats_store);
 
+static ssize_t unique_va_show(struct kobject *kobj,
+        struct kobj_attribute *attr, char *buf)
+{
+    return sprintf(buf, "%d\n", unique_virt_addrs);
+}
+
+static ssize_t unique_va_store(struct kobject *kobj,
+        struct kobj_attribute *attr,
+        const char *buf, size_t count)
+{
+    int mode;
+    int ret;
+
+    ret = kstrtoint(buf, 0, &mode);
+
+    if (ret != 0) {
+        unique_virt_addrs = 0;
+        return ret;
+    }
+    else {
+        unique_virt_addrs = mode;
+        return count;
+    }
+}
+static struct kobj_attribute unique_va_attr =
+__ATTR(unique_va, 0644, unique_va_show, unique_va_store);
+
 static struct attribute *mm_econ_attr[] = {
     &enabled_attr.attr,
     &contention_cycles_attr.attr,
     &stats_attr.attr,
     &debugging_mode_attr.attr,
+    &unique_va_attr.attr,
     NULL,
 };
 
