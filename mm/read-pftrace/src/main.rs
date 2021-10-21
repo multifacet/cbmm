@@ -27,11 +27,12 @@ struct Config {
     rejection_threshold: Option<u64>,
 
     /// Output PDF, rather than CDF.
-    #[structopt(long, conflicts_with("percentile"))]
+    #[structopt(long)]
     pdf: bool,
 
-    /// Output the combined CDF/PDF.
-    #[structopt(long, conflicts_with("percentile"))]
+    /// Combine all categories in the output, generating the overall distribution of all page
+    /// faults, rather than individual categories.
+    #[structopt(long)]
     combined: bool,
 
     /// Output tail latency based on the given maximum number of 9's. That is, given a value of 5,
@@ -39,6 +40,10 @@ struct Config {
     /// 9's).
     #[structopt(long, conflicts_with("percentile"), conflicts_with("pdf"))]
     tail: Option<usize>,
+
+    /// Report the number of events at each percentile, too.
+    #[structopt(long, conflicts_with("percentile"), conflicts_with("pdf"))]
+    freq: bool,
 
     /// Which data to output.
     #[structopt(
@@ -57,7 +62,7 @@ struct Config {
     /// less than or equal to the given threshold. Otherwise, all categories are listed, even
     /// if they only have one recorded sample. Passing this flag increases the time to process
     /// the trace.
-    #[structopt(long)]
+    #[structopt(long, conflicts_with("combined"))]
     other_category: Option<u64>,
 
     /// Exclude categories containing the given string from the trace before doing any other
@@ -478,7 +483,11 @@ fn generate_cdfs(
         let hist = categorized.get(flags).unwrap();
         print!(" {}({})", flags.name(), hist.len());
         for v in get_points(&config).map(|p| hist.value_at_quantile(p)) {
-            print!(" {}", v);
+            if config.freq {
+                print!(" {},{}", v, hist.count_between(0, v));
+            } else {
+                print!(" {}", v);
+            }
         }
     }
 
