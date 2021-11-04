@@ -507,7 +507,7 @@ void mm_stats_pftrace_init(struct mm_stats_pftrace *trace)
 
 void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
 {
-    long err;
+    long err, i;
     ssize_t total_written = 0, written;
 
     // Check if pftrace is on.
@@ -557,6 +557,20 @@ void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
             pr_err("mm_stats: error writing pftrace: w=%ld pos=%lld\n",
                     written, pftrace_pos);
             pftrace_discarded_from_error += 1;
+
+
+            // TODO remove this debugging code
+            pr_warn("mm_stats: total=%10llu bits=%llx",
+                    trace->end_tsc - trace->start_tsc,
+                    trace->bitflags);
+
+            for (i = 0; i < MM_STATS_NUM_FLAGS; ++i) {
+                if (mm_stats_test_flag(trace, i)) {
+                    pr_cont(" %s", mm_stats_pf_flags_names[i]);
+                }
+            }
+
+
             return;
         }
 
