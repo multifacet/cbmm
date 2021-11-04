@@ -358,9 +358,9 @@ static long pftrace_nwrites = 0;
 // !0: on
 //
 // At the same time, it attempts to open the pftrace file when written to.
-static inline int open_pftrace_file(void);
+static inline int open_pftrace_file(bool);
 MM_STATS_PROC_CREATE_INT_INNER(int, pftrace_enable, 0, "%d", {
-    long err = open_pftrace_file();
+    long err = open_pftrace_file(true);
     if (err) return err;
 })
 // Create /proc/pftrace_threshold - the rejection threshold for samples (in cycles).
@@ -467,12 +467,18 @@ static inline void rejected_sample(struct mm_stats_pftrace *trace)
     node->count += 1;
 }
 
-static inline int open_pftrace_file(void) {
+static inline int open_pftrace_file(bool reopen) {
     struct file *file;
     long err;
 
     // Don't open multiple times.
-    if (likely(pftrace_file != NULL)) return 0;
+    if (likely(pftrace_file != NULL && !reopen)) return 0;
+
+    // If we need to reopen the file, try closing first.
+    if (pftrace_file && reopen) {
+        filp_close(pftrace_file, NULL);
+        file = NULL;
+    }
 
     // Open the file.
     file = filp_open(MM_STATS_PFTRACE_FNAME,
@@ -523,7 +529,7 @@ void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
     }
 
     // Make sure the trace file is open.
-    err = open_pftrace_file();
+    err = open_pftrace_file(false);
     if (err) {
         pr_err_once("mm_stats: pftrace file not open. "
                     "Dropping unrejected samples!");
@@ -548,7 +554,8 @@ void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
         written = kernel_write(pftrace_file, trace,
                 sizeof(struct mm_stats_pftrace), &pftrace_pos);
         if (written < 0) {
-            pr_err("mm_stats: error writing pftrace: %ld\n", written);
+            pr_err("mm_stats: error writing pftrace: w=%ld pos=%lld\n",
+                    written, pftrace_pos);
             pftrace_discarded_from_error += 1;
             return;
         }
