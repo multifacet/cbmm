@@ -568,7 +568,8 @@ void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace, struct pt_regs *reg
                 }
             }
 
-            pr_warn("process=%d ip=%lx\n", current->pid, regs->ip);
+            pr_warn("process=%d (%s) ip=%lx\n",
+                    current->pid, current->comm, regs->ip);
 
             return;
         }
