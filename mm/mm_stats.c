@@ -528,6 +528,29 @@ void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace, struct pt_regs *reg
         return;
     }
 
+    // HACK: for some reason if we shuffle page lists and turn on pftrace with
+    // a threshold of 10000, sshd gets an XFSZ (signal 25).
+    if (strncmp(current->comm, "sshd", 4) == 0) {
+        pr_err("mm_stats: discarding sample from sshd. pos=%lld\n",
+                pftrace_pos);
+        pftrace_discarded_from_error += 1;
+
+        pr_warn("mm_stats: total=%10llu bits=%llx",
+                trace->end_tsc - trace->start_tsc,
+                trace->bitflags);
+
+        for (i = 0; i < MM_STATS_NUM_FLAGS; ++i) {
+            if (mm_stats_test_flag(trace, i)) {
+                pr_cont(" %s", mm_stats_pf_flags_names[i]);
+            }
+        }
+
+        pr_warn("process=%d (%s) ip=%lx\n",
+                current->pid, current->comm, regs->ip);
+
+        return;
+    }
+
     // Make sure the trace file is open.
     err = open_pftrace_file(false);
     if (err) {
