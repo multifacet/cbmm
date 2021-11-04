@@ -1590,6 +1590,6 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code, unsigned long addr
 			pftrace.end_tsc - pftrace.start_tsc);
     }
 
-    mm_stats_pftrace_submit(&pftrace);
+    mm_stats_pftrace_submit(&pftrace, regs);
 }
 NOKPROBE_SYMBOL(do_page_fault);

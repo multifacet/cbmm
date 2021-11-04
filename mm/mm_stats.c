@@ -505,7 +505,7 @@ void mm_stats_pftrace_init(struct mm_stats_pftrace *trace)
     memset(trace, 0, sizeof(struct mm_stats_pftrace));
 }
 
-void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
+void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace, struct pt_regs *regs)
 {
     long err, i;
     ssize_t total_written = 0, written;
@@ -558,8 +558,6 @@ void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
                     written, pftrace_pos);
             pftrace_discarded_from_error += 1;
 
-
-            // TODO remove this debugging code
             pr_warn("mm_stats: total=%10llu bits=%llx",
                     trace->end_tsc - trace->start_tsc,
                     trace->bitflags);
@@ -570,6 +568,7 @@ void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace)
                 }
             }
 
+            pr_warn("process=%d ip=%lx\n", current->pid, regs->ip);
 
             return;
         }

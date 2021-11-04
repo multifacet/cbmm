@@ -218,6 +218,6 @@ void mm_stats_pftrace_init(struct mm_stats_pftrace *trace);
 // Registers a complete sample with the sampling system after it is complete
 // (i.e. at the end of a page fault). The sampling system may then choose to
 // store or drop the sample probablistically.
-void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace);
+void mm_stats_pftrace_submit(struct mm_stats_pftrace *trace, struct pt_regs *regs);
 
 #endif
