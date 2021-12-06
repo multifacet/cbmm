@@ -360,8 +360,15 @@ static long pftrace_nwrites = 0;
 // At the same time, it attempts to open the pftrace file when written to.
 static inline int open_pftrace_file(bool);
 MM_STATS_PROC_CREATE_INT_INNER(int, pftrace_enable, 0, "%d", {
-    long err = open_pftrace_file(true);
-    if (err) return err;
+    long err;
+
+    if (pftrace_enable) {
+        err = open_pftrace_file(true);
+        if (err) return err;
+    } else if (pftrace_file) {
+        filp_close(pftrace_file, NULL);
+        file = NULL;
+    }
 })
 // Create /proc/pftrace_threshold - the rejection threshold for samples (in cycles).
 #define MM_STATS_PFTRACE_DEFAULT_THRESHOLD (100 * 1000)
