@@ -1024,6 +1024,8 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
             subranges = &huge_subranges;
         } else if (filter->policy == PolicyEagerPage) {
             subranges = &eager_subranges;
+        } else {
+            BUG();
         }
 
         passes_filter = section == filter->section;
@@ -1214,6 +1216,7 @@ void mm_copy_profile(pid_t old_pid, pid_t new_pid)
 
         new_filter->section = filter->section;
         new_filter->benefit = filter->benefit;
+        new_filter->policy = filter->policy;
         INIT_LIST_HEAD(&new_filter->comparisons);
 
         list_add_tail(&new_filter->node, &new_proc->filters);
