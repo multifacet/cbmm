@@ -117,6 +117,8 @@ static u64 mm_econ_num_hp_promotions = 0;
 static u64 mm_econ_num_async_compaction = 0;
 // Number of times we decided to run async prezeroing.
 static u64 mm_econ_num_async_prezeroing = 0;
+// Number of allocated bytes for various data structures.
+static u64 mm_econ_vmalloc_bytes = 0;
 
 extern inline struct task_struct *extern_get_proc_task(const struct inode *inode);
 
@@ -128,6 +130,23 @@ extern inline struct task_struct *extern_get_proc_task(const struct inode *inode
 // 2. A pre-loaded profile (via preloaded_profile).
 //
 // In both cases, the required units are misses/huge-page/LTU.
+
+// A wrapper around vmalloc to keep track of allocated memory.
+static void *mm_econ_vmalloc(unsigned long size)
+{
+    void *mem = vmalloc(size);
+
+    if (mem)
+        mm_econ_vmalloc_bytes += size;
+
+    return mem;
+}
+
+static void mm_econ_vfree(const void *addr, unsigned long size)
+{
+    mm_econ_vmalloc_bytes -= size;
+    vfree(addr);
+}
 
 void register_mm_econ_tlb_miss_estimator(
         mm_econ_tlb_miss_estimator_fn_t f)
@@ -303,7 +322,7 @@ static void remove_overlapping_ranges(struct rb_root *ranges_root,
     cur_range = container_of(node, struct profile_range, node);
     while (ranges_overlap(new_range, cur_range)) {
         rb_erase(node, ranges_root);
-        vfree(cur_range);
+        mm_econ_vfree(cur_range, sizeof(struct profile_range));
 
         if (!next)
             break;
@@ -377,7 +396,7 @@ profile_free_all(struct rb_root *ranges_root)
         rb_erase(node, ranges_root);
         node = ranges_root->rb_node;
 
-        vfree(range);
+        mm_econ_vfree(range, sizeof(struct profile_range));
     }
 }
 
@@ -395,11 +414,11 @@ static void mmap_filters_free_all(struct mmap_filter_proc *proc)
         list_for_each_safe(cPos, cN, &filter->comparisons) {
             comparison = list_entry(cPos, struct mmap_comparison, node);
             list_del(cPos);
-            vfree(comparison);
+            mm_econ_vfree(comparison, sizeof(struct mmap_comparison));
         }
 
         list_del(pos);
-        vfree(filter);
+        mm_econ_vfree(filter, sizeof(struct mmap_filter));
     }
 }
 
@@ -869,7 +888,7 @@ static bool mm_split_ranges(struct profile_range *base_range, struct rb_root *su
             return true;
         }
 
-        split_range = vmalloc(sizeof(struct profile_range));
+        split_range = mm_econ_vmalloc(sizeof(struct profile_range));
         if (!split_range)
             return false;
 
@@ -884,7 +903,7 @@ static bool mm_split_ranges(struct profile_range *base_range, struct rb_root *su
             return true;
         }
 
-        split_range = vmalloc(sizeof(struct profile_range));
+        split_range = mm_econ_vmalloc(sizeof(struct profile_range));
         if (!split_range)
             return false;
 
@@ -897,7 +916,7 @@ static bool mm_split_ranges(struct profile_range *base_range, struct rb_root *su
     } else if (comp == CompEquals) {
         // Do we need to split on the left?
         if (base_range->start < addr) {
-            split_range = vmalloc(sizeof(struct profile_range));
+            split_range = mm_econ_vmalloc(sizeof(struct profile_range));
             if (!split_range)
                 return false;
 
@@ -910,7 +929,7 @@ static bool mm_split_ranges(struct profile_range *base_range, struct rb_root *su
         }
         // Do we need to split on the right?
         if (base_range->end > addr + PAGE_SIZE) {
-            split_range = vmalloc(sizeof(struct profile_range));
+            split_range = mm_econ_vmalloc(sizeof(struct profile_range));
             if (!split_range)
                 return false;
 
@@ -935,7 +954,7 @@ static int mm_copy_profile_range(
 
     node = rb_first(old_root);
     while (node) {
-        new_range = vmalloc(sizeof(struct profile_range));
+        new_range = mm_econ_vmalloc(sizeof(struct profile_range));
         if (!new_range)
             return -1;
 
@@ -993,7 +1012,7 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
     filter_head = &proc->filters;
 
     // Start with the original range of the new mapping
-    range = vmalloc(sizeof(struct profile_range));
+    range = mm_econ_vmalloc(sizeof(struct profile_range));
     if (!range) {
         pr_warn("mm_add_memory_range: no memory for new range");
         return;
@@ -1093,7 +1112,7 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
                         break;
                     }
 
-                    range = vmalloc(sizeof(struct profile_range));
+                    range = mm_econ_vmalloc(sizeof(struct profile_range));
                     if (!range) {
                         profile_free_all(&temp_subranges);
                         goto err;
@@ -1142,7 +1161,7 @@ void mm_add_memory_range(pid_t pid, enum mm_memory_section section, u64 mapaddr,
         if (passes_filter && parent_range) {
             range_node = &parent_range->node;
             rb_erase(range_node, subranges);
-            vfree(parent_range);
+            mm_econ_vfree(parent_range, sizeof(struct profile_range));
 
             profile_move(&temp_subranges, subranges);
         }
@@ -1201,7 +1220,7 @@ void mm_copy_profile(pid_t old_pid, pid_t new_pid)
         return;
     }
 
-    new_proc = vmalloc(sizeof(struct mmap_filter_proc));
+    new_proc = mm_econ_vmalloc(sizeof(struct mmap_filter_proc));
     if (!new_proc)
         goto err;
     new_proc->pid = new_pid;
@@ -1211,7 +1230,7 @@ void mm_copy_profile(pid_t old_pid, pid_t new_pid)
 
     // First, copy the filters
     list_for_each_entry(filter, &proc->filters, node) {
-        new_filter = vmalloc(sizeof(struct mmap_filter));
+        new_filter = mm_econ_vmalloc(sizeof(struct mmap_filter));
         if (!new_filter)
             goto err;
 
@@ -1223,7 +1242,7 @@ void mm_copy_profile(pid_t old_pid, pid_t new_pid)
         list_add_tail(&new_filter->node, &new_proc->filters);
 
         list_for_each_entry(comparison, &filter->comparisons, node) {
-            new_comparison = vmalloc(sizeof(struct mmap_comparison));
+            new_comparison = mm_econ_vmalloc(sizeof(struct mmap_comparison));
             if (!new_comparison)
                 goto err;
 
@@ -1257,7 +1276,7 @@ err:
         profile_free_all(&new_proc->hp_ranges_root);
         profile_free_all(&new_proc->eager_ranges_root);
         mmap_filters_free_all(new_proc);
-        vfree(new_proc);
+        mm_econ_vfree(new_proc, sizeof(struct mmap_filter_proc));
     }
 }
 
@@ -1278,7 +1297,7 @@ void mm_profile_check_exiting_proc(pid_t pid)
 
         // Remove the node from the list
         list_del(&proc->node);
-        vfree(proc);
+        mm_econ_vfree(proc, sizeof(struct mmap_filter_proc));
         up_write(&filter_procs_sem);
     }
 }
@@ -1376,13 +1395,15 @@ static ssize_t stats_show(struct kobject *kobj,
     return sprintf(buf,
             "estimated=%lld\ndecided=%lld\n"
             "yes=%lld\npromoted=%lld\n"
-            "compactions=%lld\nprezerotry=%lld\n",
+            "compactions=%lld\nprezerotry=%lld\n"
+            "vmallocbytes=%lld\n",
             mm_econ_num_estimates,
             mm_econ_num_decisions,
             mm_econ_num_decisions_yes,
             mm_econ_num_hp_promotions,
             mm_econ_num_async_compaction,
-            mm_econ_num_async_prezeroing);
+            mm_econ_num_async_prezeroing,
+            mm_econ_vmalloc_bytes);
 }
 
 static ssize_t stats_store(struct kobject *kobj,
@@ -1488,7 +1509,7 @@ static ssize_t mmap_filters_read(struct file *file,
     if (!task)
         return -ESRCH;
 
-    buffer = vmalloc(sizeof(char) * MMAP_FILTER_BUF_SIZE);
+    buffer = mm_econ_vmalloc(MMAP_FILTER_BUF_SIZE);
     if (!buffer) {
         put_task_struct(task);
         return -ENOMEM;
@@ -1548,7 +1569,7 @@ out:
     ret = simple_read_from_buffer(buf, count, ppos, buffer, len);
 
     // Remember to free the buffer
-    vfree(buffer);
+    mm_econ_vfree(buffer, MMAP_FILTER_BUF_SIZE);
 
     put_task_struct(task);
 
@@ -1695,7 +1716,7 @@ static ssize_t mmap_filters_write(struct file *file,
     char * value_buf;
 
     // Copy the input from userspace
-    buf_from_user = vmalloc(sizeof(char) * (count + 1));
+    buf_from_user = mm_econ_vmalloc(count + 1);
     if (!buf_from_user)
         return -ENOMEM;
     if (copy_from_user(buf_from_user, buf, count)) {
@@ -1717,7 +1738,7 @@ static ssize_t mmap_filters_write(struct file *file,
         alloc_new_proc = false;
     } else {
         alloc_new_proc = true;
-        proc = vmalloc(sizeof(struct mmap_filter_proc));
+        proc = mm_econ_vmalloc(sizeof(struct mmap_filter_proc));
         if (!proc) {
             up_write(&filter_procs_sem);
             error = -ENOMEM;
@@ -1743,7 +1764,7 @@ static ssize_t mmap_filters_write(struct file *file,
         // Include the \n that was removed by strsep
         filter_len = strlen(tok) + 1;
 
-        filter = vmalloc(sizeof(struct mmap_filter));
+        filter = mm_econ_vmalloc(sizeof(struct mmap_filter));
         if (!filter) {
             error = -ENOMEM;
             goto err;
@@ -1788,17 +1809,16 @@ static ssize_t mmap_filters_write(struct file *file,
             if (tok[0] == '\0')
                 break;
 
-            comparison = vmalloc(sizeof(struct mmap_comparison));
+            comparison = mm_econ_vmalloc(sizeof(struct mmap_comparison));
             if (!comparison) {
                 error = -ENOMEM;
-                vfree (comparison);
                 goto err;
             }
 
             ret = mmap_filter_read_comparison(&tok, comparison);
             if (ret != 0) {
                 invalid_filter = true;
-                vfree (comparison);
+                mm_econ_vfree(comparison, sizeof(struct mmap_comparison));
                 break;
             }
 
@@ -1838,25 +1858,25 @@ static ssize_t mmap_filters_write(struct file *file,
         up_write(&filter_procs_sem);
     }
 
-    vfree(buf_from_user);
+    mm_econ_vfree(buf_from_user, count + 1);
     put_task_struct(task);
 
     return bytes_read;
 
 err:
     if (filter)
-        vfree (filter);
+        mm_econ_vfree(filter, sizeof(struct mmap_filter));
     if (proc) {
         down_write(&filter_procs_sem);
         mmap_filters_free_all(proc);
         up_write(&filter_procs_sem);
         if (alloc_new_proc)
-            vfree(proc);
+            mm_econ_vfree(proc, sizeof(struct mmap_filter_proc));
     }
     if (task)
         put_task_struct(task);
     if (buf_from_user)
-        vfree(buf_from_user);
+        mm_econ_vfree(buf_from_user, count + 1);
     return error;
 }
 
@@ -1921,7 +1941,7 @@ static ssize_t print_profile(struct file *file,
         return 0;
     }
 
-    buffer = vmalloc(sizeof(char) * MMAP_FILTER_BUF_SIZE);
+    buffer = mm_econ_vmalloc(MMAP_FILTER_BUF_SIZE);
     if (!buffer) {
         put_task_struct(task);
         return -ENOMEM;
@@ -1940,7 +1960,7 @@ static ssize_t print_profile(struct file *file,
 
     ret = simple_read_from_buffer(buf, count, ppos, buffer, len);
 
-    vfree(buffer);
+    mm_econ_vfree(buffer, MMAP_FILTER_BUF_SIZE);
 
     put_task_struct(task);
 
