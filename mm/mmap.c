@@ -301,8 +301,9 @@ success:
 				mm_populate(ranges[i].start, ranges[i].end - ranges[i].start);
 				i++;
 			}
-			vfree(ranges);
 		}
+
+		if (ranges) vfree(ranges);
 	}
 	return brk;
 
@@ -1699,8 +1700,9 @@ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 					mm_populate(ranges[i].start, ranges[i].end - ranges[i].start);
 					i++;
 				}
-				vfree(ranges);
 			}
+
+			if (ranges) vfree(ranges);
 		}
 
 	}

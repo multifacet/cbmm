@@ -537,6 +537,7 @@ compute_eager_page_benefit(const struct mm_action *action, struct mm_cost_delta 
         goto out;
 
     // +1 for the ending signal
+    cost->extra = 0;
     ranges = vmalloc(sizeof(struct range) * (range_count + 1));
     if (!ranges)
         goto out;
