@@ -32,7 +32,10 @@ int mm_econ_debugging_mode = 0;
 // Number of cycles per unit time page allocator zone lock is NOT held.
 // In this case, the unit time is 10ms because that is the granularity async
 // zero daemon uses.
-static u64 mm_econ_contention_cycles = 2600000;
+static u64 mm_econ_contention_ms = 10;
+
+// Set this properly via the sysfs file.
+static u64 mm_econ_freq_mhz = 3000;
 
 // The Preloaded Profile, if any.
 struct profile_range {
@@ -700,6 +703,8 @@ void mm_estimate_async_prezeroing_benefit(
     // cycles. This is based on previous measurements we've made.
     const u64 zeroing_per_page_cost = 1000000; // cycles
 
+    // TODO: we want to scale down the benefit to 10ms instead of 1 LTU, I think...
+
     // The maximum amount of benefit is based on the number of pages we
     // actually zero and actually use. That is, we don't benefit from zeroed
     // pages that are not used, and we do not benefit from unzeroed pages.
@@ -727,7 +732,8 @@ void mm_estimate_async_prezeroing_lock_contention_cost(
        const struct mm_action *action, struct mm_cost_delta *cost)
 {
     const u64 critical_section_cost = 150 * 2; // cycles
-    const u64 nfree = mm_econ_contention_cycles / critical_section_cost;
+    const u64 nfree = mm_econ_contention_ms * mm_econ_freq_mhz * 1000
+                      / critical_section_cost;
 
     cost->cost += (action->prezero_n > nfree ? action->prezero_n - nfree  : 0)
                     * critical_section_cost;
@@ -742,7 +748,7 @@ void mm_estimate_eager_page_cost_benefit(
     // cost.
     // We do not have to consider the cost of faulting in a huge page, since that
     // will be handled by the huge page cost/benefit logic
-    cost->cost = 26000;
+    cost->cost = mm_econ_freq_mhz * 10;
     // Populates cost->benefit and cost->extra
     compute_eager_page_benefit(action, cost);
 }
@@ -1363,28 +1369,54 @@ __ATTR(debugging_mode, 0644, debugging_mode_show, debugging_mode_store);
 static ssize_t contention_cycles_show(struct kobject *kobj,
         struct kobj_attribute *attr, char *buf)
 {
-    return sprintf(buf, "%llu\n", mm_econ_contention_cycles);
+    return sprintf(buf, "%llu\n", mm_econ_contention_ms);
 }
 
 static ssize_t contention_cycles_store(struct kobject *kobj,
         struct kobj_attribute *attr,
         const char *buf, size_t count)
 {
-    u64 cycles;
+    u64 ms;
     int ret;
 
-    ret = kstrtou64(buf, 0, &cycles);
+    ret = kstrtou64(buf, 0, &ms);
 
     if (ret != 0) {
         return ret;
     }
     else {
-        mm_econ_contention_cycles = cycles;
+        mm_econ_contention_ms = ms;
         return count;
     }
 }
 static struct kobj_attribute contention_cycles_attr =
 __ATTR(contention_cyles, 0644, contention_cycles_show, contention_cycles_store);
+
+static ssize_t freq_mhz_show(struct kobject *kobj,
+        struct kobj_attribute *attr, char *buf)
+{
+    return sprintf(buf, "%llu\n", mm_econ_freq_mhz);
+}
+
+static ssize_t freq_mhz_store(struct kobject *kobj,
+        struct kobj_attribute *attr,
+        const char *buf, size_t count)
+{
+    u64 mhz;
+    int ret;
+
+    ret = kstrtou64(buf, 0, &mhz);
+
+    if (ret != 0) {
+        return ret;
+    }
+    else {
+        mm_econ_freq_mhz = mhz;
+        return count;
+    }
+}
+static struct kobj_attribute freq_mhz_attr =
+__ATTR(freq_mhz, 0644, freq_mhz_show, freq_mhz_store);
 
 static ssize_t stats_show(struct kobject *kobj,
         struct kobj_attribute *attr, char *buf)
@@ -1417,6 +1449,7 @@ static struct attribute *mm_econ_attr[] = {
     &contention_cycles_attr.attr,
     &stats_attr.attr,
     &debugging_mode_attr.attr,
+    &freq_mhz_attr.attr,
     NULL,
 };
 
