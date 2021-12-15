@@ -616,11 +616,8 @@ mm_estimate_huge_page_promote_cost_benefit(
     cost->cost = alloc_cost + prep_cost;
     cost->extra = fhps == fhps_zeroed;
 
-
-#define TLB_MISS_COST 50 //cycles
-
     // Estimate benefit.
-    cost->benefit = TLB_MISS_COST * compute_hpage_benefit(action);
+    cost->benefit = compute_hpage_benefit(action);
 }
 
 // Update the given cost/benefit to also account for reclamation of a huge
