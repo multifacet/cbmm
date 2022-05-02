@@ -659,7 +659,7 @@ mm_estimate_daemon_cost(
     // else
     //   cost = time_to_run;
 
-    const u64 huge_page_zeroing_cost = 100000;
+    const u64 huge_page_zeroing_cost = 1000000;
 
     __kernel_ulong_t loads[3]; /* 1, 5, and 15 minute load averages */
     int ncpus = num_online_cpus();
