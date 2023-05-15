@@ -45,6 +45,17 @@ struct Config {
     #[structopt(long, conflicts_with("percentile"), conflicts_with("pdf"))]
     freq: bool,
 
+    /// Dump the trace to stdout.
+    #[structopt(
+        long,
+        conflicts_with("percentile"),
+        conflicts_with("pdf"),
+        conflicts_with("tail"),
+        conflicts_with("freq"),
+        conflicts_with("other_category")
+    )]
+    dump: bool,
+
     /// Which data to output.
     #[structopt(
         long,
@@ -252,7 +263,9 @@ fn main() -> std::io::Result<()> {
         aligned
     };
 
-    if config.percentile.is_some() {
+    if config.dump {
+        dump_trace(&config, &buf, excluded_bitmask);
+    } else if config.percentile.is_some() {
         generate_percentiles(&config, &buf, rejected.as_ref(), excluded_bitmask);
     } else if config.pdf {
         generate_pdfs(&config, &buf, rejected.as_ref(), excluded_bitmask);
@@ -407,7 +420,7 @@ fn generate_percentiles(
     buf: &[MMStatsPftrace],
     rejected: Option<&(Vec<(MMStatsBitflags, u64)>, u64)>,
     excluded_bitmask: MMStatsBitflags,
-) -> () {
+) {
     let categorized = categorize(config, buf, rejected, excluded_bitmask);
     let p = config.percentile.unwrap() / 100.0;
 
@@ -563,4 +576,20 @@ fn generate_pdfs(
         );
     }
     */
+}
+
+fn dump_trace(config: &Config, buf: &[MMStatsPftrace], excluded_bitmask: MMStatsBitflags) {
+    for trace in buf
+        .iter()
+        .filter(|t| t.bitflags.0 & excluded_bitmask.0 == 0)
+    {
+        let data = match config.data_mode {
+            DataMode::Duration => trace.end_tsc - trace.start_tsc,
+            DataMode::AllocTotal => trace.alloc_end_tsc - trace.alloc_start_tsc,
+            DataMode::AllocClearing => trace.alloc_zeroing_duration,
+            DataMode::PrepTotal => trace.prep_end_tsc - trace.prep_start_tsc,
+        };
+
+        println!("{data}");
+    }
 }
