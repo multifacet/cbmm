@@ -1455,7 +1455,7 @@ __ATTR(stats, 0444, stats_show, stats_store);
 static ssize_t delay_show(struct kobject *koj,
         struct kobj_attribute *attr, char *buf)
 {
-    return sprintf(buf, "%d", mm_econ_delay);
+    return sprintf(buf, "%d\n", mm_econ_delay);
 }
 
 static ssize_t delay_store(struct kobject *kobj,
@@ -1476,7 +1476,7 @@ static ssize_t delay_store(struct kobject *kobj,
 		return count;
 	}
 }
-static struct kobj_attribute delay =
+static struct kobj_attribute delay_attr =
 __ATTR(delay, 0644, delay_show, delay_store);
 
 static struct attribute *mm_econ_attr[] = {
@@ -1485,6 +1485,7 @@ static struct attribute *mm_econ_attr[] = {
     &stats_attr.attr,
     &debugging_mode_attr.attr,
     &freq_mhz_attr.attr,
+    &delay_attr.attr,
     NULL,
 };
 
