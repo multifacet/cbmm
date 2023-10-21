@@ -12,6 +12,7 @@
 #include <linux/sched/loadavg.h>
 #include <linux/sched/task.h>
 #include <linux/rwsem.h>
+#include <linux/delay.h>
 
 #define HUGE_PAGE_ORDER 9
 
@@ -36,6 +37,10 @@ static u64 mm_econ_contention_ms = 10;
 
 // Set this properly via the sysfs file.
 static u64 mm_econ_freq_mhz = 3000;
+
+// Artificial delay to study the affect of policy decisions in the kernel
+// This can be set using the sysfs interface
+static int mm_econ_delay = 0;
 
 // The Preloaded Profile, if any.
 struct profile_range {
@@ -842,6 +847,9 @@ bool mm_decide(const struct mm_cost_delta *cost)
     if (mm_econ_mode == 0) {
         return true;
     } else if (mm_econ_mode == 1) {
+		// Sujay: Delay the decision to see effect on performance
+		ndelay(mm_econ_delay);
+
         should_do = cost->benefit > cost->cost;
 
         if (should_do)
@@ -1443,6 +1451,33 @@ static ssize_t stats_store(struct kobject *kobj,
 }
 static struct kobj_attribute stats_attr =
 __ATTR(stats, 0444, stats_show, stats_store);
+
+static ssize_t delay_show(struct kobject *koj,
+        struct kobj_attribute *attr, char *buf)
+{
+    return sprintf(buf, "%d", mm_econ_delay);
+}
+
+static ssize_t delay_store(struct kobject *kobj,
+		struct kobj_attribute *attr,
+		const char *buf, size_t count)
+{
+	int delay_ns;
+	int ret;
+
+	ret = kstrtoint(buf, 0, &delay_ns);
+
+	if (ret != 0) {
+		mm_econ_delay = 0;
+		return ret;
+	}
+	else {
+		mm_econ_delay = delay_ns;
+		return count;
+	}
+}
+static struct kobj_attribute delay =
+__ATTR(delay, 0644, delay_show, delay_store);
 
 static struct attribute *mm_econ_attr[] = {
     &enabled_attr.attr,
